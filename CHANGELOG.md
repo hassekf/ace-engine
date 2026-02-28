@@ -4,6 +4,17 @@ All notable changes to ACE are documented in this file.
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-02-28
+
+### Changed
+- Improved `en-US` report localization coverage for dynamic Portuguese content in:
+  - security controls (title/message/recommendation)
+  - proactive suggestions (titles/details)
+- Added deterministic fragment-level translation pass in report rendering to avoid mixed-language sections in `report.en-US.html`.
+
+### Added
+- i18n regression test to ensure dynamic Portuguese text is translated in `en-US` reports.
+
 ## [0.4.0] - 2026-02-28
 
 ### Added

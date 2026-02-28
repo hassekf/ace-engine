@@ -101,3 +101,46 @@ test('writeReport renders actionability controls when violations exist', () => {
   assert.match(html, /Actionability/);
   assert.match(html, /P1 · 88/);
 });
+
+test('writeReport translates dynamic Portuguese suggestion/control text in en-US report', () => {
+  const root = makeTmpRoot();
+  const state = loadState(root);
+  state.security = {
+    score: 45,
+    totals: { total: 1, pass: 0, warning: 1, fail: 0, unknown: 0 },
+    modeSummary: {},
+    controls: [
+      {
+        id: 'laravel.debug_mode',
+        status: 'warning',
+        mode: 'semi',
+        severity: 'high',
+        category: 'laravel',
+        title: 'APP_DEBUG seguro para produção',
+        message: 'APP_ENV=local APP_DEBUG=true.',
+        recommendation: 'Em produção, garantir APP_DEBUG=false e tratamento seguro de exceções.',
+      },
+    ],
+    metadata: {},
+  };
+  state.suggestions = [
+    {
+      category: 'performance',
+      title: 'Revisar raw SQL com variáveis dinâmicas',
+      details:
+        'Foram detectadas leituras totais fora de controllers. Em jobs/commands/services isso costuma escalar mal em memória e tempo.',
+      impact: 'high',
+      effort: 'medium',
+    },
+  ];
+
+  const reportPath = writeReport(root, state, { locale: 'en-US' });
+  const html = fs.readFileSync(reportPath, 'utf8');
+
+  assert.match(html, /APP_DEBUG safe for production/);
+  assert.match(html, /In production, ensure APP_DEBUG=false and safe exception handling\./);
+  assert.match(html, /Review raw SQL with dynamic variables/);
+  assert.match(html, /Total reads outside controllers were detected\./);
+  assert.doesNotMatch(html, /APP_DEBUG seguro para produção/);
+  assert.doesNotMatch(html, /Revisar raw SQL com variáveis dinâmicas/);
+});
