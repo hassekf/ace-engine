@@ -1,6 +1,6 @@
 {
   "name": "ace-engine",
-  "version": "0.1.3",
+  "version": "0.2.0",
   "description": "Architectural Coverage Engine — zero-dependency incremental architectural analysis for Laravel projects. Measures consistency, infers patterns, evaluates security baselines, and exposes an MCP server for LLM integration.",
   "type": "commonjs",
   "bin": {

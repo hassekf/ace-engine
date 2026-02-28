@@ -32,6 +32,7 @@ test('writeReport supports en-US override', () => {
   assert.match(html, /Core Scorecards/);
   assert.match(html, /Recent Inconsistencies/);
   assert.match(html, /id="ace-lang-select"/);
+  assert.match(html, /Trend Correlations/);
 
   const reportEn = path.join(root, '.ace', 'report.en-US.html');
   const reportPt = path.join(root, '.ace', 'report.pt-BR.html');
@@ -54,4 +55,5 @@ test('writeReport uses configured report language when locale is omitted', () =>
   assert.match(html, /<html lang="en-US">/);
   assert.match(html, /Suggestions:/);
   assert.match(html, /Recent Inconsistencies/);
+  assert.match(html, /Trend Correlations/);
 });

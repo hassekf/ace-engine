@@ -28,6 +28,38 @@ function formatPercentOrFallback(value, fallback = 'N/A') {
   return `${Math.round(Number(value))}%`;
 }
 
+function formatSigned(value) {
+  const numeric = Number(value || 0);
+  if (Number.isNaN(numeric)) {
+    return '0';
+  }
+  return `${numeric > 0 ? '+' : ''}${numeric}`;
+}
+
+function normalizeTrendCoverage(trendCoverage, fallbackDelta = 0) {
+  const fallbackStatus = fallbackDelta > 1.5 ? 'improving' : fallbackDelta < -1.5 ? 'degrading' : 'stable';
+  const safeTrend = trendCoverage || {};
+  const regression = safeTrend.regression || {};
+
+  return {
+    status: safeTrend.status || fallbackStatus,
+    deltaWindow: Number(safeTrend.deltaWindow || fallbackDelta || 0),
+    averageStep: Number(safeTrend.averageStep || 0),
+    sampleSize: Number(safeTrend.sampleSize || 0),
+    regression: {
+      triggered: Boolean(regression.triggered),
+      drop: Number(regression.drop || 0),
+      threshold: Number(regression.threshold || 0),
+    },
+  };
+}
+
+function trendStatusLabel(status, copy) {
+  if (status === 'improving') return copy.trendStateImproving;
+  if (status === 'degrading') return copy.trendStateDegrading;
+  return copy.trendStateStable;
+}
+
 const REPORT_LOCALES = {
   'pt-BR': {
     code: 'pt-BR',
@@ -50,6 +82,7 @@ const REPORT_LOCALES = {
     layering: 'Layering',
     validation: 'Validation',
     testability: 'Testability',
+    testQuality: 'Qualidade dos Testes',
     consistency: 'Consistency',
     authorization: 'Authorization',
     securityAutomated: 'Security Automated',
@@ -60,6 +93,28 @@ const REPORT_LOCALES = {
     filamentWidgetsSec: 'Filament Widgets Sec',
     trendDiff: 'Trend & Diff',
     trendHistoryTitle: 'AchCoverage vs Security (histórico)',
+    trendStatus: 'Status do Trend',
+    trendWindowDelta: 'Delta da janela',
+    trendAverageStep: 'Passo médio',
+    trendWindowSamples: 'Amostras',
+    trendCorrelationsTitle: 'Correlações de Tendência',
+    trendCorrelationsEmpty: 'Dados insuficientes para correlação (mínimo 4 amostras com ambos os sinais).',
+    corrCoverageVsViolations: 'AchCoverage ↔ Total de inconsistências',
+    corrTestQualityVsNewViolations: 'Qualidade de Testes ↔ Novas inconsistências',
+    corrSecurityVsFails: 'Security Score ↔ Security fails',
+    corrStrengthStrong: 'forte',
+    corrStrengthModerate: 'moderada',
+    corrStrengthWeak: 'fraca',
+    corrDirectionInverse: 'inversa',
+    corrDirectionDirect: 'direta',
+    corrSamplePrefix: 'n',
+    trendStateImproving: 'Melhorando',
+    trendStateStable: 'Estável',
+    trendStateDegrading: 'Degradando',
+    regressionAlert: 'Alerta de regressão',
+    regressionNone: 'Sem regressão relevante',
+    points: 'pontos',
+    threshold: 'limite',
     lastCycle: 'Último ciclo',
     newInconsistencies: 'Novas inconsistências',
     resolvedItems: 'Resolvidas',
@@ -70,6 +125,10 @@ const REPORT_LOCALES = {
     domainHealthProfile: 'Domain Health Profile',
     securityBaseline: 'Security Baseline',
     securityBaselineEmpty: 'Baseline de segurança ainda não avaliado. Execute um scan.',
+    dependencyAuditsTitle: 'Dependency Audits',
+    dependencyAuditsEmpty: 'Sem dados de audit de dependências neste escopo.',
+    dependencyVulnerabilities: 'Dependency Vulnerabilities',
+    dependencyVulnerabilitiesEmpty: 'Nenhuma vulnerabilidade aberta detectada nos audits disponíveis.',
     recentViolations: 'Inconsistências Recentes',
     recentViolationsEmpty: 'Nenhuma inconsistência registrada no momento.',
     topHotspots: 'Top Hotspots',
@@ -110,7 +169,24 @@ const REPORT_LOCALES = {
     control: 'Controle',
     diagnosis: 'Diagnóstico',
     recommendation: 'Recomendação',
+    dependencyEngine: 'Engine',
+    packageName: 'Pacote',
+    advisory: 'Advisory/CVE',
+    affectedVersions: 'Versões afetadas',
+    fixVersion: 'Versão fixa',
+    evidence: 'Evidências',
+    evidenceCount: 'Contagem',
+    evidenceTotal: 'Total',
+    evidenceFiles: 'Arquivos',
+    evidenceWorkflows: 'Workflows',
+    evidenceCommand: 'Comando',
+    evidenceSource: 'Origem',
+    evidenceModelCount: 'Models',
+    evidenceCoveredModels: 'Models cobertos',
+    evidenceMissingModels: 'Models faltantes',
+    evidenceVulnerabilities: 'Vulnerabilidades',
     searchSecurityPlaceholder: 'controle, risco, recomendação...',
+    searchDependencyPlaceholder: 'package, CVE, advisory, fix...',
     searchViolationsPlaceholder: 'tipo, arquivo, mensagem...',
     visibleSuffix: 'visíveis',
     type: 'Tipo',
@@ -141,6 +217,8 @@ const REPORT_LOCALES = {
     testingHealth: 'Testing Health',
     governanceHealth: 'Governance Health',
     filesMissingTests: 'arquivo(s) sem testes',
+    filesWithoutAsserts: 'arquivo(s) de teste sem asserts',
+    noteTestQuality: 'qualidade de testes',
     ruleCount: 'regra(s)',
     decisionCount: 'decisão(ões)',
     languageLabel: 'Idioma',
@@ -174,6 +252,7 @@ const REPORT_LOCALES = {
     layering: 'Layering',
     validation: 'Validation',
     testability: 'Testability',
+    testQuality: 'Test Quality',
     consistency: 'Consistency',
     authorization: 'Authorization',
     securityAutomated: 'Security Automated',
@@ -184,6 +263,28 @@ const REPORT_LOCALES = {
     filamentWidgetsSec: 'Filament Widgets Sec',
     trendDiff: 'Trend & Diff',
     trendHistoryTitle: 'AchCoverage vs Security (history)',
+    trendStatus: 'Trend Status',
+    trendWindowDelta: 'Window delta',
+    trendAverageStep: 'Average step',
+    trendWindowSamples: 'Samples',
+    trendCorrelationsTitle: 'Trend Correlations',
+    trendCorrelationsEmpty: 'Insufficient data for correlation (minimum 4 samples with both signals).',
+    corrCoverageVsViolations: 'AchCoverage ↔ Total inconsistencies',
+    corrTestQualityVsNewViolations: 'Test Quality ↔ New inconsistencies',
+    corrSecurityVsFails: 'Security Score ↔ Security fails',
+    corrStrengthStrong: 'strong',
+    corrStrengthModerate: 'moderate',
+    corrStrengthWeak: 'weak',
+    corrDirectionInverse: 'inverse',
+    corrDirectionDirect: 'direct',
+    corrSamplePrefix: 'n',
+    trendStateImproving: 'Improving',
+    trendStateStable: 'Stable',
+    trendStateDegrading: 'Degrading',
+    regressionAlert: 'Regression alert',
+    regressionNone: 'No relevant regression',
+    points: 'points',
+    threshold: 'threshold',
     lastCycle: 'Last cycle',
     newInconsistencies: 'New inconsistencies',
     resolvedItems: 'Resolved',
@@ -194,6 +295,10 @@ const REPORT_LOCALES = {
     domainHealthProfile: 'Domain Health Profile',
     securityBaseline: 'Security Baseline',
     securityBaselineEmpty: 'Security baseline not evaluated yet. Run a scan.',
+    dependencyAuditsTitle: 'Dependency Audits',
+    dependencyAuditsEmpty: 'No dependency audit data available in this scope.',
+    dependencyVulnerabilities: 'Dependency Vulnerabilities',
+    dependencyVulnerabilitiesEmpty: 'No open vulnerabilities detected in available audits.',
     recentViolations: 'Recent Inconsistencies',
     recentViolationsEmpty: 'No inconsistencies recorded right now.',
     topHotspots: 'Top Hotspots',
@@ -234,7 +339,24 @@ const REPORT_LOCALES = {
     control: 'Control',
     diagnosis: 'Diagnosis',
     recommendation: 'Recommendation',
+    dependencyEngine: 'Engine',
+    packageName: 'Package',
+    advisory: 'Advisory/CVE',
+    affectedVersions: 'Affected versions',
+    fixVersion: 'Fix version',
+    evidence: 'Evidence',
+    evidenceCount: 'Count',
+    evidenceTotal: 'Total',
+    evidenceFiles: 'Files',
+    evidenceWorkflows: 'Workflows',
+    evidenceCommand: 'Command',
+    evidenceSource: 'Source',
+    evidenceModelCount: 'Models',
+    evidenceCoveredModels: 'Covered models',
+    evidenceMissingModels: 'Missing models',
+    evidenceVulnerabilities: 'Vulnerabilities',
     searchSecurityPlaceholder: 'control, risk, recommendation...',
+    searchDependencyPlaceholder: 'package, CVE, advisory, fix...',
     searchViolationsPlaceholder: 'type, file, message...',
     visibleSuffix: 'visible',
     type: 'Type',
@@ -265,6 +387,8 @@ const REPORT_LOCALES = {
     testingHealth: 'Testing Health',
     governanceHealth: 'Governance Health',
     filesMissingTests: 'file(s) missing tests',
+    filesWithoutAsserts: 'test file(s) without asserts',
+    noteTestQuality: 'test quality',
     ruleCount: 'rule(s)',
     decisionCount: 'decision(s)',
     languageLabel: 'Language',
@@ -310,6 +434,17 @@ function translateDynamicText(value, localeCode) {
 
   const replacements = [
     [/Sem workflows CI detectados no escopo\./gi, 'No CI workflows detected in scope.'],
+    [/Projeto sem package\.json no root\./gi, 'Project has no package.json at root.'],
+    [/Sem composer\.json\/composer\.lock no root\./gi, 'No composer.json/composer.lock at root.'],
+    [/composer audit sem vulnerabilidades reportadas\./gi, 'composer audit reported no vulnerabilities.'],
+    [/npm audit sem vulnerabilidades reportadas\./gi, 'npm audit reported no vulnerabilities.'],
+    [/composer audit reportou ([0-9]+) vulnerabilidade\(s\):/gi, 'composer audit reported $1 vulnerabilit(ies):'],
+    [/npm audit reportou ([0-9]+) vulnerabilidade\(s\):/gi, 'npm audit reported $1 vulnerabilit(ies):'],
+    [/audit não pôde ser avaliado/gi, 'audit could not be evaluated'],
+    [/falha ao executar audit:/gi, 'failed to execute audit:'],
+    [/timeout ao executar audit\./gi, 'timeout while running audit.'],
+    [/audit retornou status ([0-9]+)\./gi, 'audit returned status $1.'],
+    [/\(cache\)/gi, '(cache)'],
     [/Controle manual: requer evidência fora da análise estática local\./gi, 'Manual control: requires evidence outside local static analysis.'],
     [/Registrar evidência em docs\/CI e formalizar decisão no ACE para rastreabilidade\./gi, 'Record evidence in docs/CI and formalize the decision in ACE for traceability.'],
     [/Em produção, garantir APP_DEBUG=false e tratamento seguro de exceções\./gi, 'In production, ensure APP_DEBUG=false and safe exception handling.'],
@@ -629,6 +764,110 @@ function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
 }
 
+function toFiniteNumber(value) {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : null;
+}
+
+function roundCorrelation(value) {
+  return Number(Number(value || 0).toFixed(3));
+}
+
+function pearsonCorrelation(samples) {
+  if (!Array.isArray(samples) || samples.length < 4) {
+    return null;
+  }
+
+  const count = samples.length;
+  let sumX = 0;
+  let sumY = 0;
+  let sumXY = 0;
+  let sumX2 = 0;
+  let sumY2 = 0;
+
+  samples.forEach((item) => {
+    sumX += item.x;
+    sumY += item.y;
+    sumXY += item.x * item.y;
+    sumX2 += item.x * item.x;
+    sumY2 += item.y * item.y;
+  });
+
+  const numerator = count * sumXY - sumX * sumY;
+  const denominatorPartX = count * sumX2 - sumX * sumX;
+  const denominatorPartY = count * sumY2 - sumY * sumY;
+  const denominator = Math.sqrt(Math.max(0, denominatorPartX * denominatorPartY));
+
+  if (denominator <= 0) {
+    return null;
+  }
+
+  return roundCorrelation(numerator / denominator);
+}
+
+function buildCorrelationEntry({ history, label, xSelector, ySelector, copy }) {
+  const samples = (history || [])
+    .map((item) => ({
+      x: toFiniteNumber(xSelector(item)),
+      y: toFiniteNumber(ySelector(item)),
+    }))
+    .filter((item) => item.x != null && item.y != null);
+
+  const value = pearsonCorrelation(samples);
+  if (value == null) {
+    return {
+      label,
+      value: null,
+      strength: null,
+      direction: null,
+      sampleSize: samples.length,
+    };
+  }
+
+  const abs = Math.abs(value);
+  const strength =
+    abs >= 0.65
+      ? copy.corrStrengthStrong
+      : abs >= 0.4
+        ? copy.corrStrengthModerate
+        : copy.corrStrengthWeak;
+  const direction = value < 0 ? copy.corrDirectionInverse : copy.corrDirectionDirect;
+
+  return {
+    label,
+    value,
+    strength,
+    direction,
+    sampleSize: samples.length,
+  };
+}
+
+function buildTrendCorrelations(history, copy) {
+  return [
+    buildCorrelationEntry({
+      history,
+      label: copy.corrCoverageVsViolations,
+      xSelector: (item) => item.overall,
+      ySelector: (item) => item.violationCount,
+      copy,
+    }),
+    buildCorrelationEntry({
+      history,
+      label: copy.corrTestQualityVsNewViolations,
+      xSelector: (item) => (item.testQuality != null ? item.testQuality : item.testability),
+      ySelector: (item) => item.newViolations,
+      copy,
+    }),
+    buildCorrelationEntry({
+      history,
+      label: copy.corrSecurityVsFails,
+      xSelector: (item) => item.securityScore,
+      ySelector: (item) => item.securityFailures,
+      copy,
+    }),
+  ];
+}
+
 function buildTrendChartSvg(history, copy) {
   if (!history || history.length === 0) {
     return `<p class="empty">${escapeHtml(copy.historyEmpty)}</p>`;
@@ -697,6 +936,7 @@ function buildHealthDomains(state, copy) {
   const dimensions = coverage.dimensions || {};
   const security = state.security || {};
   const stats = state.model?.stats || {};
+  const testQualityScore = Number(coverage.testQuality?.score || dimensions.testability || 0);
   const rules = state.rules || [];
   const decisions = state.decisions || [];
   const violations = state.violations || [];
@@ -753,7 +993,7 @@ function buildHealthDomains(state, copy) {
       key: 'testing',
       label: copy.testingHealth,
       score: testingScore,
-      note: `${Number(stats.missingTests || 0)} ${copy.filesMissingTests}`,
+      note: `${Math.round(testQualityScore)}% ${copy.noteTestQuality} · ${Number(stats.missingTests || 0)} ${copy.filesMissingTests} · ${Number(stats.testFilesWithoutAssertions || 0)} ${copy.filesWithoutAsserts}`,
     },
     {
       key: 'governance',
@@ -793,7 +1033,7 @@ function resolveSecondaryCardColumnSpans(cardCount) {
 }
 
 function severityBadge(severity) {
-  if (severity === 'high') {
+  if (severity === 'critical' || severity === 'high') {
     return 'badge badge-high';
   }
 
@@ -817,15 +1057,197 @@ function controlStatusClass(status) {
   return 'badge badge-low';
 }
 
+function normalizeVulnerabilitySeverity(severity) {
+  const value = String(severity || '').toLowerCase();
+  if (!value) return 'unknown';
+  if (value.includes('critical')) return 'critical';
+  if (value.includes('high')) return 'high';
+  if (value.includes('moderate') || value.includes('medium')) return 'medium';
+  if (value.includes('low')) return 'low';
+  return 'unknown';
+}
+
+function vulnerabilitySeverityRank(severity) {
+  const map = {
+    critical: 5,
+    high: 4,
+    medium: 3,
+    low: 2,
+    unknown: 1,
+  };
+  return map[normalizeVulnerabilitySeverity(severity)] || 0;
+}
+
+function getDependencyAuditEngines(dependencyAudits = {}) {
+  const entries = [];
+  ['composer', 'npm'].forEach((key) => {
+    const item = dependencyAudits[key];
+    if (!item || typeof item !== 'object') {
+      return;
+    }
+    const hasSignals =
+      item.hasManifest ||
+      item.source === 'runtime' ||
+      item.source === 'cache' ||
+      (Array.isArray(item.vulnerabilities) && item.vulnerabilities.length > 0);
+    if (!hasSignals) {
+      return;
+    }
+    entries.push({
+      key,
+      ...item,
+      summary: {
+        total: Number(item.summary?.total || 0),
+        critical: Number(item.summary?.critical || 0),
+        high: Number(item.summary?.high || 0),
+        medium: Number(item.summary?.medium || 0),
+        low: Number(item.summary?.low || 0),
+        unknown: Number(item.summary?.unknown || 0),
+      },
+    });
+  });
+  return entries;
+}
+
+function flattenDependencyVulnerabilities(dependencyAuditEngines = []) {
+  return dependencyAuditEngines
+    .flatMap((engine) =>
+      (engine.vulnerabilities || []).map((vulnerability) => ({
+        ecosystem: vulnerability.ecosystem || engine.key,
+        package: vulnerability.package || 'unknown',
+        version: vulnerability.version || null,
+        severity: normalizeVulnerabilitySeverity(vulnerability.severity),
+        title: vulnerability.title || 'Dependency advisory',
+        cve: vulnerability.cve || null,
+        advisoryId: vulnerability.advisoryId || null,
+        url: vulnerability.url || null,
+        affectedVersions: vulnerability.affectedVersions || null,
+        fixVersion: vulnerability.fixVersion || null,
+      })),
+    )
+    .sort((a, b) => {
+      const severityDiff = vulnerabilitySeverityRank(b.severity) - vulnerabilitySeverityRank(a.severity);
+      if (severityDiff !== 0) {
+        return severityDiff;
+      }
+      return String(a.package).localeCompare(String(b.package));
+    });
+}
+
+function summarizeDependencyVulnerabilities(vulnerabilities = []) {
+  const summary = {
+    total: 0,
+    critical: 0,
+    high: 0,
+    medium: 0,
+    low: 0,
+    unknown: 0,
+  };
+  vulnerabilities.forEach((item) => {
+    summary.total += 1;
+    const severity = normalizeVulnerabilitySeverity(item?.severity);
+    summary[severity] = Number(summary[severity] || 0) + 1;
+  });
+  return summary;
+}
+
+function prettyEvidenceKey(key, copy) {
+  const dictionary = {
+    count: copy.evidenceCount,
+    total: copy.evidenceTotal,
+    files: copy.evidenceFiles,
+    workflows: copy.evidenceWorkflows,
+    command: copy.evidenceCommand,
+    source: copy.evidenceSource,
+    modelCount: copy.evidenceModelCount,
+    coveredModelCount: copy.evidenceCoveredModels,
+    missingModels: copy.evidenceMissingModels,
+    vulnerabilities: copy.evidenceVulnerabilities,
+    critical: copy.critical,
+    high: copy.high,
+    medium: copy.medium,
+    low: copy.low,
+  };
+  if (dictionary[key]) {
+    return dictionary[key];
+  }
+  return key.replace(/_/g, ' ');
+}
+
+function renderEvidenceValue(key, value, copy) {
+  if (Array.isArray(value)) {
+    if (value.length === 0) {
+      return `<span class="evidence-empty">${escapeHtml(copy.na)}</span>`;
+    }
+    const list = value
+      .slice(0, 8)
+      .map((item) => `<li><code>${escapeHtml(String(item))}</code></li>`)
+      .join('');
+    const more = value.length > 8 ? `<li>+${value.length - 8}</li>` : '';
+    return `<ul class="evidence-list">${list}${more}</ul>`;
+  }
+  if (value && typeof value === 'object') {
+    return `<code>${escapeHtml(JSON.stringify(value))}</code>`;
+  }
+  if (typeof value === 'boolean') {
+    return escapeHtml(value ? copy.pass : copy.fail);
+  }
+  if (value == null || value === '') {
+    return `<span class="evidence-empty">${escapeHtml(copy.na)}</span>`;
+  }
+  return escapeHtml(String(value));
+}
+
+function renderEvidenceDetails(evidence, copy) {
+  if (!evidence || typeof evidence !== 'object') {
+    return '';
+  }
+  const entries = Object.entries(evidence).filter(([, value]) => {
+    if (Array.isArray(value)) return value.length > 0;
+    if (value && typeof value === 'object') return Object.keys(value).length > 0;
+    return value !== null && value !== undefined && value !== '';
+  });
+  if (entries.length === 0) {
+    return '';
+  }
+  const rows = entries
+    .slice(0, 10)
+    .map(
+      ([key, value]) => `
+        <div class="evidence-row">
+          <span>${escapeHtml(prettyEvidenceKey(key, copy))}</span>
+          <strong>${renderEvidenceValue(key, value, copy)}</strong>
+        </div>`,
+    )
+    .join('');
+
+  return `
+    <details class="evidence-details">
+      <summary>${escapeHtml(copy.evidence)}</summary>
+      <div class="evidence-grid">${rows}</div>
+    </details>`;
+}
+
 function generateHtmlReport(state, options = {}) {
   const copy = getReportCopy(options.locale);
   const languageFiles = options.languageFiles || REPORT_LANGUAGE_FILES;
+  const historyLimit = Math.max(6, Number(options.historyLimit || 24));
   const coverage = state.coverage || {};
   const dimensions = coverage.dimensions || {};
-  const trend = coverage.delta || 0;
-  const trendText = trend > 0 ? `+${trend}` : `${trend}`;
+  const trend = Number(coverage.delta || 0);
+  const trendText = formatSigned(trend);
   const history = state.history || [];
-  const recentHistory = history.slice(-24);
+  const recentHistory = history.slice(-historyLimit);
+  const trendCoverage = normalizeTrendCoverage(state.trend?.coverage, trend);
+  const trendStatus = String(trendCoverage.status || 'stable');
+  const trendStatusText = trendStatusLabel(trendStatus, copy);
+  const trendWindowDeltaText = formatSigned(trendCoverage.deltaWindow);
+  const trendAverageStepText = formatSigned(trendCoverage.averageStep);
+  const trendSamples = Number(trendCoverage.sampleSize || recentHistory.length || 0);
+  const trendRegression = trendCoverage.regression || { triggered: false, drop: 0, threshold: 0 };
+  const trendRegressionText = trendRegression.triggered
+    ? `-${trendRegression.drop} ${copy.points} / ${copy.threshold} ${trendRegression.threshold}`
+    : copy.regressionNone;
 
   const violations = state.violations || [];
   const waivedViolations = state.waivedViolations || [];
@@ -837,33 +1259,61 @@ function generateHtmlReport(state, options = {}) {
   const securityTotals = security.totals || {};
   const securityModeSummary = security.modeSummary || {};
   const securityControls = security.controls || [];
+  const dependencyAuditEngines = getDependencyAuditEngines(security.metadata?.dependencyAudits || {});
+  const dependencyVulnerabilities = flattenDependencyVulnerabilities(dependencyAuditEngines).slice(0, 240);
+  const dependencyVulnerabilitySummary = summarizeDependencyVulnerabilities(dependencyVulnerabilities);
   const filamentScores = security.filamentScores || security.metadata?.filamentScores || {};
   const hasFilamentPageScore = Boolean(filamentScores.pages);
   const hasFilamentWidgetScore = Boolean(filamentScores.widgets);
   const filamentPageScore = hasFilamentPageScore ? Number(filamentScores.pages?.score || 0) : null;
   const filamentWidgetScore = hasFilamentWidgetScore ? Number(filamentScores.widgets?.score || 0) : null;
+  const scopeValue = `${Number(coverage.scannedFiles || 0)}/${Number(coverage.totalPhpFiles || 0)}`;
+  const scorecardHints = {
+    achCoverage: `${copy.layering}: ${formatPercent(dimensions.layering)} · ${copy.validation}: ${formatPercent(dimensions.validation)} · ${copy.testability}: ${formatPercent(dimensions.testability)} · ${copy.consistency}: ${formatPercent(dimensions.consistency)} · ${copy.authorization}: ${formatPercent(dimensions.authorization)}`,
+    trend: `${copy.trendWindowDelta}: ${trendWindowDeltaText} · ${copy.trendAverageStep}: ${trendAverageStepText} · ${copy.trendWindowSamples}: ${trendSamples}`,
+    confidence: `${copy.scope}: ${scopeValue} · ${copy.trendStatus}: ${trendStatusText}`,
+    securityScore: `${copy.securityFails}: ${Number(securityTotals.fail || 0)} · ${copy.warning}: ${Number(securityTotals.warning || 0)} · ${copy.pass}: ${Number(securityTotals.pass || 0)}`,
+    securityFails: `${copy.securityLabel}: ${formatPercent(security.score || 0)} · ${copy.dependencyVulnerabilities}: ${dependencyVulnerabilitySummary.total}`,
+    scope: `${copy.scope}: ${scopeValue}`,
+    layering: `${Number(state.model?.stats?.controllersUsingService || 0)} service-layer / ${Number(state.model?.stats?.controllersWithDirectModel || 0)} direct model`,
+    validation: `${Number(state.model?.stats?.controllersUsingFormRequest || 0)} FormRequest/DTO · $request->all(): ${Number(state.model?.stats?.requestAllCalls || 0)}`,
+    testability: `${Math.round(Number(coverage.testQuality?.score || 0))}% ${copy.noteTestQuality} · ${Number(state.model?.stats?.missingTests || 0)} ${copy.filesMissingTests}`,
+    consistency: `${violations.length} ${copy.violationsLabel.toLowerCase()} · ${waivedViolations.length} ${copy.waiver.toLowerCase()}`,
+    authorization: `${Number(state.model?.stats?.authorizationChecks || 0)} checks · policy coverage ${Math.round(Number(security.metadata?.authzCoverage?.policyModelCoverage?.coveredModelCount || 0))}/${Math.round(Number(security.metadata?.authzCoverage?.policyModelCoverage?.modelCount || 0)) || 0}`,
+  };
   const secondaryCards = [
     {
       title: copy.securityAutomated,
       value: formatPercent(securityModeSummary.automated?.score || 0),
+      hint: `${copy.securityAutomated}: ${formatPercent(securityModeSummary.automated?.score || 0)} · ${Number(securityModeSummary.automated?.fail || 0)} ${copy.noteFails}`,
+      targetPanel: 'security-panel',
     },
     {
       title: copy.securitySemi,
       value: formatPercent(securityModeSummary.semi?.score || 0),
+      hint: `${copy.securitySemi}: ${formatPercent(securityModeSummary.semi?.score || 0)} · ${Number(securityModeSummary.semi?.warning || 0)} ${copy.noteWarnings}`,
+      targetPanel: 'security-panel',
     },
     {
       title: copy.securityManual,
       value: formatPercent(securityModeSummary.manual?.score || 0),
+      hint: `${copy.securityManual}: ${formatPercent(securityModeSummary.manual?.score || 0)} · ${Number(securityModeSummary.manual?.unknown || 0)} ${copy.unknown.toLowerCase()}`,
+      targetPanel: 'security-panel',
     },
     {
       title: copy.securityStatus,
       value: `${Number(securityTotals.pass || 0)}/${Number(securityTotals.total || 0)}`,
+      hint: `${copy.pass}: ${Number(securityTotals.pass || 0)} · ${copy.warning}: ${Number(securityTotals.warning || 0)} · ${copy.fail}: ${Number(securityTotals.fail || 0)}`,
+      targetPanel: 'security-panel',
     },
     ...(hasFilamentPageScore
       ? [
           {
             title: copy.filamentPagesSec,
             value: formatPercentOrFallback(filamentPageScore, copy.na),
+            hint: `${copy.filamentPagesSec}: ${formatPercentOrFallback(filamentPageScore, copy.na)} (${Number(filamentScores.pages?.authorized || 0)}/${Number(filamentScores.pages?.total || 0)})`,
+            targetPanel: 'security-panel',
+            securityCategory: 'filament',
           },
         ]
       : []),
@@ -872,6 +1322,9 @@ function generateHtmlReport(state, options = {}) {
           {
             title: copy.filamentWidgetsSec,
             value: formatPercentOrFallback(filamentWidgetScore, copy.na),
+            hint: `${copy.filamentWidgetsSec}: ${formatPercentOrFallback(filamentWidgetScore, copy.na)} (${Number(filamentScores.widgets?.authorized || 0)}/${Number(filamentScores.widgets?.total || 0)})`,
+            targetPanel: 'security-panel',
+            securityCategory: 'filament',
           },
         ]
       : []),
@@ -880,13 +1333,38 @@ function generateHtmlReport(state, options = {}) {
   const secondaryCardMarkup = secondaryCards
     .map(
       (item, index) => `
-        <article class="kpi-card kpi-col-${Number(secondaryCardSpans[index] || 2)}">
+        <article class="kpi-card kpi-col-${Number(secondaryCardSpans[index] || 2)} is-clickable" title="${escapeHtml(item.hint || '')}" data-target-panel="${escapeHtml(item.targetPanel || '')}" data-security-category="${escapeHtml(item.securityCategory || '')}">
           <h3>${escapeHtml(item.title)}</h3>
           <p class="metric">${escapeHtml(item.value)}</p>
         </article>`,
     )
     .join('');
   const trendSvg = buildTrendChartSvg(recentHistory, copy);
+  const trendCorrelations = buildTrendCorrelations(recentHistory, copy);
+  const trendCorrelationRows = trendCorrelations
+    .map((item) => {
+      if (item.value == null) {
+        return `
+        <div class="corr-item">
+          <h4>${escapeHtml(item.label)}</h4>
+          <p class="corr-empty">${escapeHtml(copy.trendCorrelationsEmpty)}</p>
+        </div>`;
+      }
+
+      const badgeClass = item.value < 0 ? 'corr-badge corr-inverse' : 'corr-badge corr-direct';
+      const valueText = `${item.value > 0 ? '+' : ''}${item.value}`;
+      const sampleText = `${copy.corrSamplePrefix}=${Number(item.sampleSize || 0)}`;
+      return `
+      <div class="corr-item">
+        <h4>${escapeHtml(item.label)}</h4>
+        <div class="corr-row">
+          <span class="corr-value">${escapeHtml(valueText)}</span>
+          <span class="${badgeClass}">${escapeHtml(item.strength)} · ${escapeHtml(item.direction)}</span>
+        </div>
+        <p class="corr-sample">${escapeHtml(sampleText)}</p>
+      </div>`;
+    })
+    .join('');
   const healthDomainCards = buildHealthDomains(state, copy)
     .map(
       (item) => `
@@ -1016,9 +1494,57 @@ function generateHtmlReport(state, options = {}) {
     })
     .join('');
 
+  const dependencyEngineCards = dependencyAuditEngines
+    .map((engine) => {
+      const statusClass = controlStatusClass(engine.status || 'unknown');
+      const title = engine.key === 'composer' ? 'Composer Audit' : 'NPM Audit';
+      const engineHint = [
+        `${copy.status}: ${engine.status || 'unknown'}`,
+        `${copy.source}: ${engine.source || '-'}`,
+        `${copy.total}: ${Number(engine.summary?.total || 0)}`,
+      ].join(' · ');
+      return `
+        <article class="kpi-card is-clickable" title="${escapeHtml(engineHint)}" data-target-panel="dependency-audits-panel" data-audit-engine="${escapeHtml(engine.key)}">
+          <h3>${escapeHtml(title)}</h3>
+          <p class="metric">${Number(engine.summary?.total || 0)}</p>
+          <p class="audit-note"><span class="${statusClass}">${escapeHtml(engine.status || 'unknown')}</span></p>
+        </article>`;
+    })
+    .join('');
+
+  const dependencyEcosystemOptions = Array.from(
+    new Set(dependencyVulnerabilities.map((item) => item.ecosystem).filter(Boolean)),
+  )
+    .sort((a, b) => String(a).localeCompare(String(b)))
+    .map((ecosystem) => `<option value="${escapeHtml(ecosystem)}">${escapeHtml(String(ecosystem).toUpperCase())}</option>`)
+    .join('');
+
+  const dependencyRows = dependencyVulnerabilities
+    .map((item) => {
+      const severity = normalizeVulnerabilitySeverity(item.severity);
+      const search = `${item.ecosystem} ${item.package} ${item.title} ${item.cve || ''} ${item.advisoryId || ''} ${item.affectedVersions || ''} ${item.fixVersion || ''}`.toLowerCase();
+      const advisoryLabel = item.cve || item.advisoryId || '-';
+      const title = translateDynamicText(item.title || '-', copy.code);
+      const fixLabel = item.fixVersion || '-';
+      const reference = item.url
+        ? `<a href="${escapeHtml(item.url)}" target="_blank" rel="noreferrer noopener">${escapeHtml(advisoryLabel)}</a>`
+        : escapeHtml(advisoryLabel);
+      return `
+      <tr data-severity="${escapeHtml(severity)}" data-ecosystem="${escapeHtml(item.ecosystem)}" data-search="${escapeHtml(search)}">
+        <td><span class="${severityBadge(severity)}">${escapeHtml(severity)}</span></td>
+        <td>${escapeHtml(String(item.ecosystem || '').toUpperCase())}</td>
+        <td><code>${escapeHtml(item.package || 'unknown')}</code></td>
+        <td>${reference}</td>
+        <td>${escapeHtml(title)}</td>
+        <td>${escapeHtml(item.affectedVersions || '-')}</td>
+        <td>${escapeHtml(fixLabel)}</td>
+      </tr>`;
+    })
+    .join('');
+
   const filteredSecurityRows = securityControls
     .slice(0, 200)
-    .map((control) => {
+    .map((control, index) => {
       const translatedTitle = translateDynamicText(control.title || '-', copy.code);
       const translatedMessage = translateDynamicText(control.message || '-', copy.code);
       const translatedRecommendation = translateDynamicText(control.recommendation || '-', copy.code);
@@ -1026,9 +1552,20 @@ function generateHtmlReport(state, options = {}) {
       const mode = String(control.mode || 'unknown').toLowerCase();
       const severity = String(control.severity || 'low').toLowerCase();
       const category = String(control.category || 'general').toLowerCase();
-      const search = `${translatedTitle} ${translatedMessage} ${translatedRecommendation} ${control.id || ''}`.toLowerCase();
+      const evidenceText = JSON.stringify(control.evidence || {}).toLowerCase();
+      const search = `${translatedTitle} ${translatedMessage} ${translatedRecommendation} ${control.id || ''} ${evidenceText}`.toLowerCase();
+      const evidenceDetails = renderEvidenceDetails(control.evidence, copy);
+      const rowKey = `${String(control.id || 'control').replace(/[^a-zA-Z0-9_-]/g, '-')}-${index}`;
+      const evidenceRow = evidenceDetails
+        ? `
+      <tr class="security-evidence-row" data-parent-row="${escapeHtml(rowKey)}">
+        <td colspan="7">
+          <div class="security-evidence-cell">${evidenceDetails}</div>
+        </td>
+      </tr>`
+        : '';
       return `
-      <tr data-status="${escapeHtml(status)}" data-mode="${escapeHtml(mode)}" data-severity="${escapeHtml(severity)}" data-category="${escapeHtml(category)}" data-search="${escapeHtml(search)}">
+      <tr class="security-main-row" data-row-key="${escapeHtml(rowKey)}" data-status="${escapeHtml(status)}" data-mode="${escapeHtml(mode)}" data-severity="${escapeHtml(severity)}" data-category="${escapeHtml(category)}" data-search="${escapeHtml(search)}">
         <td><span class="${controlStatusClass(control.status)}">${escapeHtml(control.status)}</span></td>
         <td>${escapeHtml(control.mode)}</td>
         <td>${escapeHtml(control.severity)}</td>
@@ -1036,7 +1573,7 @@ function generateHtmlReport(state, options = {}) {
         <td>${escapeHtml(translatedTitle)}</td>
         <td>${escapeHtml(translatedMessage)}</td>
         <td>${escapeHtml(translatedRecommendation)}</td>
-      </tr>`;
+      </tr>${evidenceRow}`;
     })
     .join('');
 
@@ -1288,6 +1825,15 @@ function generateHtmlReport(state, options = {}) {
       box-shadow: 0 20px 38px rgba(5, 10, 24, .56);
     }
 
+    .kpi-card.is-clickable {
+      cursor: pointer;
+    }
+
+    .kpi-card.is-clickable:focus-visible {
+      outline: 2px solid #6ab4ff;
+      outline-offset: 2px;
+    }
+
     .kpi-card h3 {
       margin: 0;
       font-size: .78rem;
@@ -1311,6 +1857,13 @@ function generateHtmlReport(state, options = {}) {
     .scope-card .metric {
       font-size: clamp(1.6rem, 1.2rem + 1vw, 2.05rem);
       letter-spacing: -.015em;
+    }
+
+    .audit-note {
+      margin: 0;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
     }
 
     .delta-positive { color: var(--ok); }
@@ -1439,6 +1992,30 @@ function generateHtmlReport(state, options = {}) {
       background: #162746;
     }
 
+    .security-evidence-row td {
+      background: #0f1a31;
+      padding: 0 12px 12px;
+      border-bottom: 1px solid #263a63;
+    }
+
+    .security-evidence-row:hover td {
+      background: #0f1a31;
+    }
+
+    .security-evidence-cell {
+      width: 100%;
+      padding-top: 8px;
+    }
+
+    a {
+      color: #93d5ff;
+      text-decoration: none;
+    }
+
+    a:hover {
+      text-decoration: underline;
+    }
+
     code {
       background: #15284c;
       padding: 2px 6px;
@@ -1520,6 +2097,77 @@ function generateHtmlReport(state, options = {}) {
       color: var(--muted);
       font-size: 0.92rem;
       margin: 0;
+    }
+
+    .evidence-details {
+      margin-top: 4px;
+      width: 100%;
+      border: 1px dashed #2f497e;
+      border-radius: 10px;
+      padding: 7px 9px;
+      background: rgba(17, 30, 54, 0.62);
+    }
+
+    .evidence-details summary {
+      cursor: pointer;
+      color: #9eb6e6;
+      font-size: .78rem;
+      font-weight: 700;
+      letter-spacing: .03em;
+      text-transform: uppercase;
+      list-style: none;
+    }
+
+    .evidence-details summary::-webkit-details-marker {
+      display: none;
+    }
+
+    .evidence-details[open] summary {
+      margin-bottom: 8px;
+    }
+
+    .evidence-grid {
+      display: grid;
+      gap: 8px;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .evidence-row {
+      display: grid;
+      grid-template-columns: minmax(96px, 160px) 1fr;
+      gap: 8px;
+      align-items: start;
+      font-size: .8rem;
+    }
+
+    .evidence-row span {
+      color: #96abda;
+      text-transform: uppercase;
+      letter-spacing: .05em;
+      font-weight: 700;
+      font-size: .66rem;
+      padding-top: 3px;
+    }
+
+    .evidence-row strong {
+      color: #d9e6ff;
+      font-weight: 600;
+      overflow-wrap: anywhere;
+      display: block;
+      min-width: 0;
+    }
+
+    .evidence-list {
+      margin: 0;
+      padding-left: 18px;
+      display: grid;
+      gap: 4px;
+    }
+
+    .evidence-empty {
+      color: #89a0d3;
+      font-style: italic;
+      font-weight: 500;
     }
 
     .mini-grid {
@@ -1693,6 +2341,119 @@ function generateHtmlReport(state, options = {}) {
       font-weight: 700;
     }
 
+    .corr-grid {
+      display: grid;
+      gap: 10px;
+    }
+
+    .corr-item {
+      border: 1px solid #2c426f;
+      border-radius: 12px;
+      padding: 10px 11px;
+      background: #121f3b;
+      display: grid;
+      gap: 7px;
+    }
+
+    .corr-item h4 {
+      margin: 0;
+      font-size: .78rem;
+      line-height: 1.35;
+      color: #c3d5ff;
+      font-weight: 700;
+      letter-spacing: .02em;
+    }
+
+    .corr-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+    }
+
+    .corr-value {
+      font-size: 1.1rem;
+      font-weight: 800;
+      color: #e6efff;
+      letter-spacing: -.01em;
+    }
+
+    .corr-badge {
+      border-radius: 999px;
+      border: 1px solid #355696;
+      background: #1a315d;
+      color: #bfd5ff;
+      font-size: .68rem;
+      text-transform: uppercase;
+      letter-spacing: .05em;
+      font-weight: 800;
+      padding: 4px 9px;
+      white-space: nowrap;
+    }
+
+    .corr-badge.corr-inverse {
+      border-color: rgba(50, 203, 142, .75);
+      background: rgba(20, 93, 65, .72);
+      color: #a3ffd6;
+    }
+
+    .corr-badge.corr-direct {
+      border-color: rgba(232, 94, 94, .75);
+      background: rgba(106, 34, 45, .72);
+      color: #ffc0c0;
+    }
+
+    .corr-empty,
+    .corr-sample {
+      margin: 0;
+      font-size: .76rem;
+      color: #8ea3d1;
+    }
+
+    .kpi-line-danger strong {
+      color: #ff9e9e;
+    }
+
+    .trend-pill {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 999px;
+      border: 1px solid #314a7e;
+      padding: 3px 9px;
+      font-size: .72rem;
+      text-transform: uppercase;
+      letter-spacing: .06em;
+      font-weight: 800;
+      background: #162745;
+      color: #c8d8ff;
+      min-width: 96px;
+    }
+
+    .trend-pill.trend-improving {
+      border-color: rgba(42, 188, 127, .7);
+      background: rgba(24, 87, 62, .68);
+      color: #9ef6cb;
+    }
+
+    .trend-pill.trend-stable {
+      border-color: rgba(85, 132, 219, .72);
+      background: rgba(24, 54, 104, .7);
+      color: #b9d7ff;
+    }
+
+    .trend-pill.trend-degrading {
+      border-color: rgba(226, 84, 84, .7);
+      background: rgba(104, 31, 43, .68);
+      color: #ffb3b3;
+    }
+
+    .panel-focus {
+      border-color: #5f8ff1;
+      box-shadow: 0 0 0 2px rgba(95, 143, 241, 0.34), var(--shadow-soft);
+      transition: box-shadow .28s ease, border-color .28s ease;
+    }
+
     @media (max-width: 1300px) {
       .score-grid-primary {
         grid-template-columns: repeat(8, minmax(0, 1fr));
@@ -1771,6 +2532,10 @@ function generateHtmlReport(state, options = {}) {
       .score-grid-secondary .kpi-card {
         grid-column: span 1;
       }
+
+      .evidence-grid {
+        grid-template-columns: 1fr;
+      }
     }
   </style>
 </head>
@@ -1797,47 +2562,47 @@ function generateHtmlReport(state, options = {}) {
     <section class="panel">
       <h2 class="panel-title">${escapeHtml(copy.coreScorecards)}</h2>
       <section class="score-grid score-grid-primary">
-        <article class="kpi-card">
+        <article class="kpi-card is-clickable" title="${escapeHtml(scorecardHints.achCoverage)}" data-target-panel="trend-panel">
           <h3>${escapeHtml(copy.achCoverage)}</h3>
           <p class="metric">${formatPercent(coverage.overall)}</p>
         </article>
-        <article class="kpi-card">
+        <article class="kpi-card is-clickable" title="${escapeHtml(scorecardHints.trend)}" data-target-panel="trend-panel">
           <h3>${escapeHtml(copy.trend)}</h3>
           <p class="metric ${trend > 0 ? 'delta-positive' : trend < 0 ? 'delta-negative' : 'delta-neutral'}">${trendText}</p>
         </article>
-        <article class="kpi-card">
+        <article class="kpi-card is-clickable" title="${escapeHtml(scorecardHints.confidence)}" data-target-panel="trend-panel">
           <h3>${escapeHtml(copy.confidence)}</h3>
           <p class="metric">${formatPercent(coverage.confidence)}</p>
         </article>
-        <article class="kpi-card">
+        <article class="kpi-card is-clickable" title="${escapeHtml(scorecardHints.securityScore)}" data-target-panel="security-panel">
           <h3>${escapeHtml(copy.securityScore)}</h3>
           <p class="metric">${formatPercent(security.score || 0)}</p>
         </article>
-        <article class="kpi-card">
+        <article class="kpi-card is-clickable" title="${escapeHtml(scorecardHints.securityFails)}" data-target-panel="security-panel" data-security-status="fail">
           <h3>${escapeHtml(copy.securityFails)}</h3>
           <p class="metric">${Number(securityTotals.fail || 0)}</p>
         </article>
-        <article class="kpi-card scope-card">
+        <article class="kpi-card scope-card is-clickable" title="${escapeHtml(scorecardHints.scope)}" data-target-panel="violations-panel">
           <h3>${escapeHtml(copy.scope)}</h3>
-          <p class="metric">${Number(coverage.scannedFiles || 0)}/${Number(coverage.totalPhpFiles || 0)}</p>
+          <p class="metric">${scopeValue}</p>
         </article>
-        <article class="kpi-card">
+        <article class="kpi-card is-clickable" title="${escapeHtml(scorecardHints.layering)}" data-target-panel="violations-panel" data-violations-query="direct model service layer fat-controller fat-service">
           <h3>${escapeHtml(copy.layering)}</h3>
           <p class="metric">${formatPercent(dimensions.layering)}</p>
         </article>
-        <article class="kpi-card">
+        <article class="kpi-card is-clickable" title="${escapeHtml(scorecardHints.validation)}" data-target-panel="violations-panel" data-violations-query="validation formrequest mass-assignment request->all">
           <h3>${escapeHtml(copy.validation)}</h3>
           <p class="metric">${formatPercent(dimensions.validation)}</p>
         </article>
-        <article class="kpi-card">
+        <article class="kpi-card is-clickable" title="${escapeHtml(scorecardHints.testability)}" data-target-panel="violations-panel" data-violations-query="test missing">
           <h3>${escapeHtml(copy.testability)}</h3>
           <p class="metric">${formatPercent(dimensions.testability)}</p>
         </article>
-        <article class="kpi-card">
+        <article class="kpi-card is-clickable" title="${escapeHtml(scorecardHints.consistency)}" data-target-panel="violations-panel" data-violations-query="pattern-drift inconsistency">
           <h3>${escapeHtml(copy.consistency)}</h3>
           <p class="metric">${formatPercent(dimensions.consistency)}</p>
         </article>
-        <article class="kpi-card">
+        <article class="kpi-card is-clickable" title="${escapeHtml(scorecardHints.authorization)}" data-target-panel="security-panel" data-security-category="authorization">
           <h3>${escapeHtml(copy.authorization)}</h3>
           <p class="metric">${formatPercent(dimensions.authorization)}</p>
         </article>
@@ -1847,7 +2612,7 @@ function generateHtmlReport(state, options = {}) {
       </section>
     </section>
 
-    <section class="panel">
+    <section class="panel" id="trend-panel">
       <h2 class="panel-title">${escapeHtml(copy.trendDiff)}</h2>
       <div class="mini-grid">
         <article class="mini-panel">
@@ -1862,6 +2627,21 @@ function generateHtmlReport(state, options = {}) {
           <div class="kpi-line"><span>${escapeHtml(copy.cacheHits)}</span><strong>${Number(state.lastScan?.cacheHits || 0)}</strong></div>
           <div class="kpi-line"><span>${escapeHtml(copy.reanalyzedFiles)}</span><strong>${Number(state.lastScan?.analyzedFiles || 0)}</strong></div>
           <div class="kpi-line"><span>${escapeHtml(copy.ignoredByConfig)}</span><strong>${Number(state.lastScan?.ignoredFiles || 0)}</strong></div>
+          <div class="kpi-line"><span>${escapeHtml(copy.testQuality)}</span><strong>${Math.round(Number(coverage.testQuality?.score || 0))}%</strong></div>
+          <div class="kpi-line"><span>${escapeHtml(copy.trendStatus)}</span><strong><span class="trend-pill trend-${escapeHtml(trendStatus)}">${escapeHtml(trendStatusText)}</span></strong></div>
+          <div class="kpi-line"><span>${escapeHtml(copy.trendWindowDelta)}</span><strong>${escapeHtml(trendWindowDeltaText)}</strong></div>
+          <div class="kpi-line"><span>${escapeHtml(copy.trendAverageStep)}</span><strong>${escapeHtml(trendAverageStepText)}</strong></div>
+          <div class="kpi-line"><span>${escapeHtml(copy.trendWindowSamples)}</span><strong>${trendSamples}</strong></div>
+          <div class="kpi-line ${trendRegression.triggered ? 'kpi-line-danger' : ''}">
+            <span>${escapeHtml(copy.regressionAlert)}</span>
+            <strong>${escapeHtml(trendRegressionText)}</strong>
+          </div>
+        </article>
+        <article class="mini-panel">
+          <h3 class="mini-title">${escapeHtml(copy.trendCorrelationsTitle)}</h3>
+          <div class="corr-grid">
+            ${trendCorrelationRows}
+          </div>
         </article>
       </div>
     </section>
@@ -1935,6 +2715,75 @@ function generateHtmlReport(state, options = {}) {
               </tr>
             </thead>
             <tbody id="security-table-body">${filteredSecurityRows}</tbody>
+          </table>
+        </div>`}
+    </section>
+
+    <section class="panel" id="dependency-audits-panel">
+      <h2 class="panel-title">${escapeHtml(copy.dependencyAuditsTitle)}</h2>
+      ${dependencyAuditEngines.length === 0
+        ? `<p class="empty">${escapeHtml(copy.dependencyAuditsEmpty)}</p>`
+        : `<section class="score-grid score-grid-secondary">
+          ${dependencyEngineCards}
+          <article class="kpi-card">
+            <h3>${escapeHtml(copy.dependencyVulnerabilities)}</h3>
+            <p class="metric">${dependencyVulnerabilitySummary.total}</p>
+          </article>
+          <article class="kpi-card">
+            <h3>${escapeHtml(copy.critical)}</h3>
+            <p class="metric">${dependencyVulnerabilitySummary.critical}</p>
+          </article>
+          <article class="kpi-card">
+            <h3>${escapeHtml(copy.high)}</h3>
+            <p class="metric">${dependencyVulnerabilitySummary.high}</p>
+          </article>
+          <article class="kpi-card">
+            <h3>${escapeHtml(copy.medium)}</h3>
+            <p class="metric">${dependencyVulnerabilitySummary.medium}</p>
+          </article>
+        </section>`}
+      ${dependencyVulnerabilities.length === 0
+        ? `<p class="empty">${escapeHtml(copy.dependencyVulnerabilitiesEmpty)}</p>`
+        : `<div class="filters filters-compact" id="dependency-filters">
+          <label class="filter-field">
+            <span>${escapeHtml(copy.severity)}</span>
+            <select id="dependency-severity">
+              <option value="">${escapeHtml(copy.allFem)}</option>
+              <option value="critical">${escapeHtml(copy.critical)}</option>
+              <option value="high">${escapeHtml(copy.high)}</option>
+              <option value="medium">${escapeHtml(copy.medium)}</option>
+              <option value="low">${escapeHtml(copy.low)}</option>
+              <option value="unknown">${escapeHtml(copy.unknown)}</option>
+            </select>
+          </label>
+          <label class="filter-field">
+            <span>${escapeHtml(copy.dependencyEngine)}</span>
+            <select id="dependency-ecosystem">
+              <option value="">${escapeHtml(copy.allMasc)}</option>
+              ${dependencyEcosystemOptions}
+            </select>
+          </label>
+          <label class="filter-field">
+            <span>${escapeHtml(copy.search)}</span>
+            <input id="dependency-search" type="search" placeholder="${escapeHtml(copy.searchDependencyPlaceholder)}" />
+          </label>
+          <button type="button" class="btn-clear" id="dependency-clear">${escapeHtml(copy.clearFilters)}</button>
+          <span class="filter-counter" id="dependency-counter"></span>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>${escapeHtml(copy.severity)}</th>
+                <th>${escapeHtml(copy.dependencyEngine)}</th>
+                <th>${escapeHtml(copy.packageName)}</th>
+                <th>${escapeHtml(copy.advisory)}</th>
+                <th>${escapeHtml(copy.message)}</th>
+                <th>${escapeHtml(copy.affectedVersions)}</th>
+                <th>${escapeHtml(copy.fixVersion)}</th>
+              </tr>
+            </thead>
+            <tbody id="dependency-table-body">${dependencyRows}</tbody>
           </table>
         </div>`}
     </section>
@@ -2139,7 +2988,7 @@ function generateHtmlReport(state, options = {}) {
         const searchEl = document.getElementById('security-search');
         const clearEl = document.getElementById('security-clear');
         const counterEl = document.getElementById('security-counter');
-        const rows = Array.from(tbody.querySelectorAll('tr'));
+        const rows = Array.from(tbody.querySelectorAll('tr.security-main-row'));
 
         function render() {
           const status = asLower(statusEl.value);
@@ -2157,6 +3006,13 @@ function generateHtmlReport(state, options = {}) {
             const okSearch = !search || (row.dataset.search || '').includes(search);
             const ok = okStatus && okMode && okSeverity && okCategory && okSearch;
             row.style.display = ok ? '' : 'none';
+            const evidenceRow =
+              row.nextElementSibling && row.nextElementSibling.classList.contains('security-evidence-row')
+                ? row.nextElementSibling
+                : null;
+            if (evidenceRow) {
+              evidenceRow.style.display = ok ? '' : 'none';
+            }
             if (ok) visible += 1;
           });
 
@@ -2216,6 +3072,104 @@ function generateHtmlReport(state, options = {}) {
         render();
       }
 
+      function setupDependencyFilters() {
+        const tbody = document.getElementById('dependency-table-body');
+        if (!tbody) return;
+
+        const severityEl = document.getElementById('dependency-severity');
+        const ecosystemEl = document.getElementById('dependency-ecosystem');
+        const searchEl = document.getElementById('dependency-search');
+        const clearEl = document.getElementById('dependency-clear');
+        const counterEl = document.getElementById('dependency-counter');
+        const rows = Array.from(tbody.querySelectorAll('tr'));
+
+        function render() {
+          const severity = asLower(severityEl.value);
+          const ecosystem = asLower(ecosystemEl.value);
+          const search = asLower(searchEl.value);
+          let visible = 0;
+
+          rows.forEach(function (row) {
+            const okSeverity = !severity || row.dataset.severity === severity;
+            const okEcosystem = !ecosystem || row.dataset.ecosystem === ecosystem;
+            const okSearch = !search || (row.dataset.search || '').includes(search);
+            const ok = okSeverity && okEcosystem && okSearch;
+            row.style.display = ok ? '' : 'none';
+            if (ok) visible += 1;
+          });
+
+          counterEl.textContent = visible + ' / ' + rows.length + ' ' + visibleLabel;
+        }
+
+        severityEl.addEventListener('change', render);
+        ecosystemEl.addEventListener('change', render);
+        searchEl.addEventListener('input', render);
+        clearEl.addEventListener('click', function () {
+          severityEl.value = '';
+          ecosystemEl.value = '';
+          searchEl.value = '';
+          render();
+        });
+
+        render();
+      }
+
+      function setupKpiInteractions() {
+        const cards = Array.from(document.querySelectorAll('.kpi-card.is-clickable'));
+        if (cards.length === 0) return;
+
+        cards.forEach(function (card) {
+          card.addEventListener('click', function () {
+            const targetPanelId = card.dataset.targetPanel || '';
+            const securityCategory = card.dataset.securityCategory || '';
+            const securityStatus = card.dataset.securityStatus || '';
+            const violationsQuery = card.dataset.violationsQuery || '';
+            const auditEngine = card.dataset.auditEngine || '';
+
+            if (securityCategory) {
+              const el = document.getElementById('security-category');
+              if (el) {
+                el.value = securityCategory;
+                el.dispatchEvent(new Event('change'));
+              }
+            }
+
+            if (securityStatus) {
+              const el = document.getElementById('security-status');
+              if (el) {
+                el.value = securityStatus;
+                el.dispatchEvent(new Event('change'));
+              }
+            }
+
+            if (violationsQuery) {
+              const el = document.getElementById('violation-search');
+              if (el) {
+                el.value = violationsQuery;
+                el.dispatchEvent(new Event('input'));
+              }
+            }
+
+            if (auditEngine) {
+              const el = document.getElementById('dependency-ecosystem');
+              if (el) {
+                el.value = auditEngine;
+                el.dispatchEvent(new Event('change'));
+              }
+            }
+
+            if (!targetPanelId) return;
+            const panel = document.getElementById(targetPanelId);
+            if (!panel) return;
+            panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            panel.classList.add('panel-focus');
+            window.setTimeout(function () {
+              panel.classList.remove('panel-focus');
+            }, 1300);
+          });
+        });
+      }
+
       function setupLanguageSelector() {
         const selector = document.getElementById('ace-lang-select');
         if (!selector) return;
@@ -2233,6 +3187,8 @@ function generateHtmlReport(state, options = {}) {
 
       setupSecurityFilters();
       setupViolationFilters();
+      setupDependencyFilters();
+      setupKpiInteractions();
       setupLanguageSelector();
     }());
   </script>
@@ -2249,10 +3205,20 @@ function resolveReportLocale(root, options = {}) {
   return normalizeReportLocale(config?.report?.language);
 }
 
+function resolveReportHistoryLimit(root) {
+  const config = loadAceConfig(root);
+  const candidate = Number(config?.report?.historyLimit || 24);
+  if (Number.isNaN(candidate) || candidate <= 0) {
+    return 24;
+  }
+  return candidate;
+}
+
 function writeReport(root, state, options = {}) {
   const outputPath = path.join(root, ACE_DIR, REPORT_FILE);
   const locale = resolveReportLocale(root, options);
   const languageFiles = REPORT_LANGUAGE_FILES;
+  const historyLimit = resolveReportHistoryLimit(root);
 
   Object.entries(languageFiles).forEach(([lang, filename]) => {
     const localizedPath = path.join(root, ACE_DIR, filename);
@@ -2261,6 +3227,7 @@ function writeReport(root, state, options = {}) {
       `${generateHtmlReport(state, {
         locale: lang,
         languageFiles,
+        historyLimit,
       })}\n`,
       'utf8',
     );
@@ -2271,6 +3238,7 @@ function writeReport(root, state, options = {}) {
     `${generateHtmlReport(state, {
       locale,
       languageFiles,
+      historyLimit,
     })}\n`,
     'utf8',
   );

@@ -14,6 +14,9 @@ function defaultConfig() {
     version: 1,
     analysis: {
       ignorePaths: [],
+      regressionThreshold: 5,
+      trendWindow: 8,
+      trendStableBand: 1.5,
       thresholds: {
         fatControllerLines: 220,
         largeControllerMethodLines: 80,
@@ -42,6 +45,14 @@ function defaultConfig() {
         testability: 0.18,
         consistency: 0.19,
         authorization: 0.15,
+      },
+    },
+    security: {
+      audits: {
+        composer: true,
+        npm: true,
+        timeoutMs: 15000,
+        maxEntries: 120,
       },
     },
     report: {
@@ -78,6 +89,14 @@ function mergeConfig(parsed = {}) {
       weights: {
         ...base.coverage.weights,
         ...((parsed.coverage && parsed.coverage.weights) || {}),
+      },
+    },
+    security: {
+      ...base.security,
+      ...(parsed.security || {}),
+      audits: {
+        ...base.security.audits,
+        ...((parsed.security && parsed.security.audits) || {}),
       },
     },
     report: {

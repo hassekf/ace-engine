@@ -1,4 +1,6 @@
 const fs = require('node:fs');
+const crypto = require('node:crypto');
+const { spawnSync } = require('node:child_process');
 const path = require('node:path');
 const { nowIso } = require('./helpers');
 const { getComposerDependencyVersions, detectProjectModules, buildModuleScopeDraft } = require('./modules');
@@ -277,6 +279,22 @@ const CONTROL_CATALOG = [
     frequency: 'S',
   },
   {
+    id: 'dependencies.composer_runtime_audit',
+    title: 'Composer audit sem vulnerabilidades abertas',
+    category: 'supply-chain',
+    severity: 'high',
+    mode: 'automated',
+    frequency: 'PR',
+  },
+  {
+    id: 'dependencies.npm_runtime_audit',
+    title: 'NPM audit sem vulnerabilidades abertas',
+    category: 'supply-chain',
+    severity: 'medium',
+    mode: 'automated',
+    frequency: 'PR',
+  },
+  {
     id: 'pipeline.composer_audit_gate',
     title: 'Gate de composer audit no CI',
     category: 'pipeline',
@@ -438,6 +456,422 @@ function compareVersions(a, b) {
     return pa.patch > pb.patch ? 1 : -1;
   }
   return 0;
+}
+
+function hashFileIfExists(filePath) {
+  if (!fs.existsSync(filePath)) {
+    return null;
+  }
+  try {
+    const buffer = fs.readFileSync(filePath);
+    return crypto.createHash('sha1').update(buffer).digest('hex');
+  } catch (error) {
+    return null;
+  }
+}
+
+function buildFingerprint(root, fileCandidates = []) {
+  const parts = [];
+  fileCandidates.forEach((relativePath) => {
+    const normalized = String(relativePath || '').replace(/\\/g, '/');
+    if (!normalized) {
+      return;
+    }
+    const absolutePath = path.join(root, normalized);
+    const hash = hashFileIfExists(absolutePath);
+    if (!hash) {
+      return;
+    }
+    parts.push(`${normalized}:${hash}`);
+  });
+  if (parts.length === 0) {
+    return null;
+  }
+  return crypto.createHash('sha1').update(parts.join('|')).digest('hex');
+}
+
+function normalizeAuditSeverity(value) {
+  const normalized = String(value || '').toLowerCase();
+  if (!normalized) return 'unknown';
+  if (normalized.includes('critical')) return 'critical';
+  if (normalized.includes('high')) return 'high';
+  if (normalized.includes('moderate') || normalized.includes('medium')) return 'medium';
+  if (normalized.includes('low')) return 'low';
+  return 'unknown';
+}
+
+function summarizeAuditVulnerabilities(vulnerabilities = []) {
+  const summary = {
+    total: 0,
+    critical: 0,
+    high: 0,
+    medium: 0,
+    low: 0,
+    unknown: 0,
+  };
+  vulnerabilities.forEach((item) => {
+    summary.total += 1;
+    const severity = normalizeAuditSeverity(item?.severity);
+    summary[severity] = Number(summary[severity] || 0) + 1;
+  });
+  return summary;
+}
+
+function dedupeAuditVulnerabilities(vulnerabilities = []) {
+  const map = new Map();
+  vulnerabilities.forEach((item, index) => {
+    const key = [
+      item?.ecosystem || 'unknown',
+      item?.package || 'unknown',
+      item?.advisoryId || item?.cve || item?.title || `idx-${index}`,
+      normalizeAuditSeverity(item?.severity),
+    ].join('|');
+    if (!map.has(key)) {
+      map.set(key, item);
+    }
+  });
+  return Array.from(map.values());
+}
+
+function parseComposerAuditPayload(payload, { maxEntries = 120 } = {}) {
+  const vulnerabilities = [];
+  const advisories = payload?.advisories;
+
+  if (Array.isArray(advisories)) {
+    advisories.forEach((entry) => {
+      vulnerabilities.push({
+        ecosystem: 'composer',
+        package: entry.package || entry.packageName || entry.name || 'unknown',
+        version: entry.version || null,
+        severity: normalizeAuditSeverity(entry.severity),
+        title: entry.title || entry.advisoryTitle || 'Composer advisory',
+        cve: entry.cve || null,
+        advisoryId: entry.advisoryId || entry.id || null,
+        url: entry.link || entry.url || null,
+        affectedVersions: entry.affectedVersions || entry.affected || null,
+        fixVersion: entry.fixedVersion || entry.recommendedVersion || null,
+      });
+    });
+  } else if (advisories && typeof advisories === 'object') {
+    Object.entries(advisories).forEach(([packageName, advisoryList]) => {
+      const entries = Array.isArray(advisoryList) ? advisoryList : [];
+      entries.forEach((entry) => {
+        vulnerabilities.push({
+          ecosystem: 'composer',
+          package: packageName || entry.packageName || entry.package || 'unknown',
+          version: entry.version || null,
+          severity: normalizeAuditSeverity(entry.severity),
+          title: entry.title || entry.advisoryTitle || 'Composer advisory',
+          cve: entry.cve || null,
+          advisoryId: entry.advisoryId || entry.id || null,
+          url: entry.link || entry.url || null,
+          affectedVersions: entry.affectedVersions || entry.affected || null,
+          fixVersion: entry.fixedVersion || entry.recommendedVersion || null,
+        });
+      });
+    });
+  }
+
+  const deduped = dedupeAuditVulnerabilities(vulnerabilities).slice(0, Math.max(20, maxEntries));
+  return {
+    vulnerabilities: deduped,
+    summary: summarizeAuditVulnerabilities(deduped),
+  };
+}
+
+function parseNpmAuditPayload(payload, { maxEntries = 120 } = {}) {
+  const vulnerabilities = [];
+  const vulnerabilityMap = payload?.vulnerabilities || {};
+  Object.entries(vulnerabilityMap).forEach(([packageName, entry]) => {
+    const baseSeverity = normalizeAuditSeverity(entry?.severity);
+    const viaList = Array.isArray(entry?.via) ? entry.via : [];
+    const advisoryObjects = viaList.filter((via) => via && typeof via === 'object');
+
+    if (advisoryObjects.length === 0) {
+      vulnerabilities.push({
+        ecosystem: 'npm',
+        package: packageName,
+        version: entry?.range || null,
+        severity: baseSeverity,
+        title: `NPM advisory: ${packageName}`,
+        cve: null,
+        advisoryId: null,
+        url: null,
+        affectedVersions: entry?.range || null,
+        fixVersion:
+          typeof entry?.fixAvailable === 'object'
+            ? entry.fixAvailable.version || null
+            : entry?.fixAvailable
+              ? 'available'
+              : null,
+      });
+      return;
+    }
+
+    advisoryObjects.forEach((advisory) => {
+      const advisorySeverity = normalizeAuditSeverity(advisory.severity || entry?.severity);
+      vulnerabilities.push({
+        ecosystem: 'npm',
+        package: advisory.name || packageName,
+        version: advisory.range || entry?.range || null,
+        severity: advisorySeverity,
+        title: advisory.title || `NPM advisory: ${packageName}`,
+        cve: advisory.cve || null,
+        advisoryId: advisory.source ? String(advisory.source) : null,
+        url: advisory.url || null,
+        affectedVersions: advisory.range || entry?.range || null,
+        fixVersion:
+          typeof entry?.fixAvailable === 'object'
+            ? entry.fixAvailable.version || null
+            : entry?.fixAvailable
+              ? 'available'
+              : null,
+      });
+    });
+  });
+
+  const deduped = dedupeAuditVulnerabilities(vulnerabilities).slice(0, Math.max(20, maxEntries));
+  return {
+    vulnerabilities: deduped,
+    summary: summarizeAuditVulnerabilities(deduped),
+  };
+}
+
+function runAuditCommand({
+  root,
+  command,
+  args,
+  timeoutMs = 15000,
+  commandRunner = null,
+}) {
+  const startedAt = Date.now();
+  const runner =
+    typeof commandRunner === 'function'
+      ? commandRunner
+      : (cmd, cmdArgs, options) =>
+          spawnSync(cmd, cmdArgs, {
+            cwd: options.cwd,
+            encoding: 'utf8',
+            timeout: options.timeoutMs,
+            maxBuffer: 12 * 1024 * 1024,
+          });
+
+  const result = runner(command, args, {
+    cwd: root,
+    timeoutMs,
+  });
+  const durationMs = Date.now() - startedAt;
+
+  return {
+    status: Number.isInteger(result?.status) ? result.status : null,
+    stdout: String(result?.stdout || ''),
+    stderr: String(result?.stderr || ''),
+    error: result?.error ? String(result.error.message || result.error) : null,
+    timedOut: Boolean(result?.error && result.error?.code === 'ETIMEDOUT'),
+    durationMs,
+  };
+}
+
+function resolveAuditStatus({ hasManifest, summary, execution }) {
+  if (!hasManifest) {
+    return 'unknown';
+  }
+  if (!execution || execution.error || execution.status == null || execution.status > 1) {
+    return 'warning';
+  }
+  if ((summary.critical || 0) > 0 || (summary.high || 0) > 0) {
+    return 'fail';
+  }
+  if ((summary.total || 0) > 0) {
+    return 'warning';
+  }
+  return 'pass';
+}
+
+function buildAuditMessage({ tool, hasManifest, summary, execution, cached }) {
+  if (!hasManifest) {
+    return tool === 'npm'
+      ? 'Projeto sem package.json no root.'
+      : 'Sem composer.json/composer.lock no root.';
+  }
+
+  if (!execution || execution.error || execution.status == null || execution.status > 1) {
+    const reason = execution?.timedOut
+      ? 'timeout ao executar audit.'
+      : execution?.error
+        ? `falha ao executar audit: ${execution.error}`
+        : `audit retornou status ${execution?.status}.`;
+    return `${tool} audit não pôde ser avaliado (${reason})`;
+  }
+
+  if ((summary.total || 0) === 0) {
+    return `${tool} audit sem vulnerabilidades reportadas.${cached ? ' (cache)' : ''}`;
+  }
+
+  return `${tool} audit reportou ${summary.total} vulnerabilidade(s): critical=${summary.critical || 0}, high=${summary.high || 0}, medium=${summary.medium || 0}, low=${summary.low || 0}.${cached ? ' (cache)' : ''}`;
+}
+
+function evaluateRuntimeDependencyAudit({
+  root,
+  tool,
+  command,
+  args,
+  manifestFiles = [],
+  fingerprintFiles = null,
+  previousAudit = null,
+  enabled = true,
+  timeoutMs = 15000,
+  maxEntries = 120,
+  parser,
+  commandRunner = null,
+}) {
+  const hasManifest = manifestFiles.some((relativePath) => fs.existsSync(path.join(root, relativePath)));
+  const fingerprint = buildFingerprint(root, fingerprintFiles || manifestFiles);
+  const previous = previousAudit && typeof previousAudit === 'object' ? previousAudit : null;
+
+  if (!enabled) {
+    return {
+      tool,
+      hasManifest,
+      enabled: false,
+      usedCache: false,
+      source: 'disabled',
+      fingerprint,
+      command: `${command} ${args.join(' ')}`.trim(),
+      summary: { total: 0, critical: 0, high: 0, medium: 0, low: 0, unknown: 0 },
+      vulnerabilities: [],
+      status: 'unknown',
+      message: `${tool} audit desativado na configuração.`,
+      execution: {
+        status: null,
+        durationMs: 0,
+        error: null,
+        timedOut: false,
+      },
+      updatedAt: nowIso(),
+    };
+  }
+
+  if (!hasManifest) {
+    return {
+      tool,
+      hasManifest,
+      enabled: true,
+      usedCache: false,
+      source: 'not-applicable',
+      fingerprint,
+      command: `${command} ${args.join(' ')}`.trim(),
+      summary: { total: 0, critical: 0, high: 0, medium: 0, low: 0, unknown: 0 },
+      vulnerabilities: [],
+      status: 'unknown',
+      message: buildAuditMessage({
+        tool,
+        hasManifest,
+        summary: { total: 0, critical: 0, high: 0, medium: 0, low: 0, unknown: 0 },
+        execution: null,
+        cached: false,
+      }),
+      execution: {
+        status: null,
+        durationMs: 0,
+        error: null,
+        timedOut: false,
+      },
+      updatedAt: nowIso(),
+    };
+  }
+
+  if (
+    previous &&
+    previous.fingerprint &&
+    fingerprint &&
+    previous.fingerprint === fingerprint &&
+    Array.isArray(previous.vulnerabilities) &&
+    previous.execution &&
+    !previous.execution.error &&
+    previous.execution.status != null
+  ) {
+    const summary = previous.summary || summarizeAuditVulnerabilities(previous.vulnerabilities);
+    return {
+      ...previous,
+      tool,
+      hasManifest,
+      enabled: true,
+      usedCache: true,
+      source: 'cache',
+      fingerprint,
+      message: buildAuditMessage({
+        tool,
+        hasManifest,
+        summary,
+        execution: previous.execution || { status: 0, error: null },
+        cached: true,
+      }),
+      updatedAt: nowIso(),
+    };
+  }
+
+  const execution = runAuditCommand({
+    root,
+    command,
+    args,
+    timeoutMs,
+    commandRunner,
+  });
+
+  let parsed = {
+    vulnerabilities: [],
+    summary: { total: 0, critical: 0, high: 0, medium: 0, low: 0, unknown: 0 },
+  };
+
+  if (!execution.error && execution.stdout) {
+    try {
+      const payload = JSON.parse(execution.stdout);
+      parsed = parser(payload, { maxEntries });
+    } catch (error) {
+      execution.error = `JSON parse error: ${error.message}`;
+    }
+  } else if (!execution.error && execution.status === 0) {
+    parsed = {
+      vulnerabilities: [],
+      summary: { total: 0, critical: 0, high: 0, medium: 0, low: 0, unknown: 0 },
+    };
+  }
+
+  const summary = parsed.summary || summarizeAuditVulnerabilities(parsed.vulnerabilities);
+  const status = resolveAuditStatus({
+    hasManifest,
+    summary,
+    execution,
+  });
+  const message = buildAuditMessage({
+    tool,
+    hasManifest,
+    summary,
+    execution,
+    cached: false,
+  });
+
+  return {
+    tool,
+    hasManifest,
+    enabled: true,
+    usedCache: false,
+    source: 'runtime',
+    fingerprint,
+    command: `${command} ${args.join(' ')}`.trim(),
+    summary,
+    vulnerabilities: parsed.vulnerabilities || [],
+    status,
+    message,
+    execution: {
+      status: execution.status,
+      durationMs: execution.durationMs,
+      error: execution.error,
+      timedOut: execution.timedOut,
+    },
+    updatedAt: nowIso(),
+  };
 }
 
 function getEnvVar(content, key) {
@@ -786,7 +1220,15 @@ function sortControls(controls) {
   });
 }
 
-function evaluateSecurityBaseline({ root, metrics = {}, violations = [], fileIndex = {} }) {
+function evaluateSecurityBaseline({
+  root,
+  metrics = {},
+  violations = [],
+  fileIndex = {},
+  previousSecurityMetadata = {},
+  auditOptions = {},
+  commandRunner = null,
+}) {
   const controls = [];
   const composerVersions = getComposerDependencyVersions(root);
   const detectedModules = detectProjectModules({
@@ -798,6 +1240,35 @@ function evaluateSecurityBaseline({ root, metrics = {}, violations = [], fileInd
   const moduleScopeDraft = buildModuleScopeDraft(detectedModules);
   const workflowSignals = detectPipelineSignals(root);
   const authCoverageSignals = collectPolicyAndGateCoverage({ root, fileIndex });
+  const previousDependencyAudits = previousSecurityMetadata?.dependencyAudits || {};
+  const composerAudit = evaluateRuntimeDependencyAudit({
+    root,
+    tool: 'composer',
+    command: 'composer',
+    args: ['audit', '--locked', '--format=json', '--no-ansi'],
+    manifestFiles: ['composer.lock', 'composer.json'],
+    fingerprintFiles: ['composer.lock', 'composer.json'],
+    previousAudit: previousDependencyAudits.composer || null,
+    enabled: auditOptions.composer !== false,
+    timeoutMs: Number(auditOptions.timeoutMs || 15000),
+    maxEntries: Number(auditOptions.maxEntries || 120),
+    parser: parseComposerAuditPayload,
+    commandRunner,
+  });
+  const npmAudit = evaluateRuntimeDependencyAudit({
+    root,
+    tool: 'npm',
+    command: 'npm',
+    args: ['audit', '--json', '--audit-level=low'],
+    manifestFiles: ['package.json'],
+    fingerprintFiles: ['package.json', 'package-lock.json', 'npm-shrinkwrap.json', 'pnpm-lock.yaml', 'yarn.lock'],
+    previousAudit: previousDependencyAudits.npm || null,
+    enabled: auditOptions.npm !== false,
+    timeoutMs: Number(auditOptions.timeoutMs || 15000),
+    maxEntries: Number(auditOptions.maxEntries || 120),
+    parser: parseNpmAuditPayload,
+    commandRunner,
+  });
 
   const envPath = path.join(root, '.env');
   const envContent = fs.existsSync(envPath) ? fs.readFileSync(envPath, 'utf8') : '';
@@ -1263,6 +1734,50 @@ function evaluateSecurityBaseline({ root, metrics = {}, violations = [], fileInd
     evaluateVersionFloor,
   });
 
+  if (composerAudit.hasManifest) {
+    controls.push(
+      createControl(CONTROL_CATALOG.find((item) => item.id === 'dependencies.composer_runtime_audit'), {
+        status: composerAudit.status,
+        message: composerAudit.message,
+        recommendation:
+          'Execute composer audit em CI/CD e mantenha dependências no floor seguro com política de atualização contínua.',
+        evidence: {
+          vulnerabilities: composerAudit.summary.total || 0,
+          critical: composerAudit.summary.critical || 0,
+          high: composerAudit.summary.high || 0,
+          medium: composerAudit.summary.medium || 0,
+          low: composerAudit.summary.low || 0,
+          command: composerAudit.command,
+          source: composerAudit.source,
+          files: ['composer.json', 'composer.lock'].filter((item) => fs.existsSync(path.join(root, item))),
+        },
+      }),
+    );
+  }
+
+  if (npmAudit.hasManifest) {
+    controls.push(
+      createControl(CONTROL_CATALOG.find((item) => item.id === 'dependencies.npm_runtime_audit'), {
+        status: npmAudit.status,
+        message: npmAudit.message,
+        recommendation:
+          'Execute npm audit no pipeline e trate vulnerabilidades com fix disponível priorizando High/Critical.',
+        evidence: {
+          vulnerabilities: npmAudit.summary.total || 0,
+          critical: npmAudit.summary.critical || 0,
+          high: npmAudit.summary.high || 0,
+          medium: npmAudit.summary.medium || 0,
+          low: npmAudit.summary.low || 0,
+          command: npmAudit.command,
+          source: npmAudit.source,
+          files: ['package.json', 'package-lock.json', 'npm-shrinkwrap.json'].filter((item) =>
+            fs.existsSync(path.join(root, item)),
+          ),
+        },
+      }),
+    );
+  }
+
   controls.push(
     createControl(CONTROL_CATALOG.find((item) => item.id === 'pipeline.composer_audit_gate'), {
       status: !workflowSignals.hasWorkflows ? 'unknown' : workflowSignals.composerAudit ? 'pass' : 'warning',
@@ -1435,6 +1950,10 @@ function evaluateSecurityBaseline({ root, metrics = {}, violations = [], fileInd
         sanctum: composerVersions.get('laravel/sanctum') || null,
         spatiePermission: composerVersions.get('spatie/laravel-permission') || null,
         horizon: composerVersions.get('laravel/horizon') || null,
+      },
+      dependencyAudits: {
+        composer: composerAudit,
+        npm: npmAudit,
       },
       authzCoverage: {
         policyModelCoverage: policyCoverageControl

@@ -2,7 +2,9 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { lineFromIndex, normalizePath, slugify } = require('./helpers');
 
-const ANALYZER_VERSION = 15;
+const ANALYZER_VERSION = 16;
+const QUERY_BOUNDING_CALL_REGEX =
+  /->(?:paginate|simplePaginate|cursorPaginate|limit|take|forPage|first|find|value|exists|count|max|min|avg|sum|pluck|chunk|chunkById|lazy|lazyById|cursor)\s*\(/;
 
 function createMetrics() {
   return {
@@ -579,12 +581,16 @@ function analyzeDynamicRawSql({ relativePath, content, metrics, signals, violati
   for (const match of content.matchAll(matcher)) {
     const line = lineFromIndex(content, match.index);
     const callSnippet = extractCallSnippet(content, match.index);
-    const hasVariableInSqlLiteral = /['"`][^'"`]*\$\w+[^'"`]*['"`]/.test(callSnippet);
-    const hasTemplateInterpolation = /\{\$[A-Za-z_]/.test(callSnippet);
-    const hasConcat = /(?:['"`]\s*\.\s*\$|\$\w+\s*\.)/.test(callSnippet);
-    const hasRequestInput = /\$(?:request|input|data|payload)|\brequest\s*\(|\binput\s*\(/i.test(callSnippet);
-    const hasBindingsArray = /,\s*(?:\[[\s\S]*?\]|array\s*\()/i.test(callSnippet);
-    const hasPlaceholder = /['"`][^'"`]*\?[^'"`]*['"`]/.test(callSnippet);
+    const callArguments = extractCallArguments(callSnippet);
+    const sqlExpression = String(callArguments[0] || '').trim();
+    const hasSqlLiteral = isQuotedStringLiteral(sqlExpression);
+    const hasVariableInSqlLiteral = /['"`][^'"`]*\$\w+[^'"`]*['"`]/.test(sqlExpression);
+    const hasTemplateInterpolation = /\{\$[A-Za-z_]/.test(sqlExpression);
+    const hasConcat = /(?:['"`]\s*\.\s*(?:\$|request\s*\(|input\s*\()|(?:\$|request\s*\(|input\s*\().*\.)/i.test(sqlExpression);
+    const hasRequestInputInSqlExpression = /\$request->|\brequest\s*\(|\binput\s*\(/i.test(sqlExpression);
+    const hasBindingsArg = callArguments.length > 1;
+    const hasPlaceholder = /\?/.test(sqlExpression);
+    const hasDynamicSqlExpression = sqlExpression && !hasSqlLiteral;
 
     metrics.rawSqlCalls += 1;
     signals.rawSqlLines.push(line);
@@ -593,8 +599,9 @@ function analyzeDynamicRawSql({ relativePath, content, metrics, signals, violati
       hasVariableInSqlLiteral ||
       hasTemplateInterpolation ||
       hasConcat ||
-      hasRequestInput ||
-      (hasPlaceholder && !hasBindingsArray);
+      hasRequestInputInSqlExpression ||
+      hasDynamicSqlExpression ||
+      (hasPlaceholder && !hasBindingsArg);
 
     if (isUnsafe) {
       metrics.unsafeRawSqlCalls += 1;
@@ -737,6 +744,141 @@ function findMatchingParenthesis(text, openParenIndex) {
   return findMatchingDelimiter(text, openParenIndex, '(', ')');
 }
 
+function escapeRegExp(value) {
+  return String(value || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function splitTopLevelArguments(rawArgs) {
+  const args = [];
+  let current = '';
+  let depthParen = 0;
+  let depthBracket = 0;
+  let depthBrace = 0;
+  let inSingleQuote = false;
+  let inDoubleQuote = false;
+  let inLineComment = false;
+  let inBlockComment = false;
+  let escapeNext = false;
+
+  for (let index = 0; index < rawArgs.length; index += 1) {
+    const char = rawArgs[index];
+    const nextChar = rawArgs[index + 1];
+
+    if (inLineComment) {
+      current += char;
+      if (char === '\n') {
+        inLineComment = false;
+      }
+      continue;
+    }
+
+    if (inBlockComment) {
+      current += char;
+      if (char === '*' && nextChar === '/') {
+        current += '/';
+        index += 1;
+        inBlockComment = false;
+      }
+      continue;
+    }
+
+    if (inSingleQuote) {
+      current += char;
+      if (!escapeNext && char === "'") {
+        inSingleQuote = false;
+      }
+      escapeNext = !escapeNext && char === '\\';
+      continue;
+    }
+
+    if (inDoubleQuote) {
+      current += char;
+      if (!escapeNext && char === '"') {
+        inDoubleQuote = false;
+      }
+      escapeNext = !escapeNext && char === '\\';
+      continue;
+    }
+
+    if (char === '/' && nextChar === '/') {
+      current += '//';
+      index += 1;
+      inLineComment = true;
+      continue;
+    }
+
+    if (char === '/' && nextChar === '*') {
+      current += '/*';
+      index += 1;
+      inBlockComment = true;
+      continue;
+    }
+
+    if (char === "'") {
+      current += char;
+      inSingleQuote = true;
+      escapeNext = false;
+      continue;
+    }
+
+    if (char === '"') {
+      current += char;
+      inDoubleQuote = true;
+      escapeNext = false;
+      continue;
+    }
+
+    if (char === '(') depthParen += 1;
+    else if (char === ')') depthParen = Math.max(0, depthParen - 1);
+    else if (char === '[') depthBracket += 1;
+    else if (char === ']') depthBracket = Math.max(0, depthBracket - 1);
+    else if (char === '{') depthBrace += 1;
+    else if (char === '}') depthBrace = Math.max(0, depthBrace - 1);
+
+    if (char === ',' && depthParen === 0 && depthBracket === 0 && depthBrace === 0) {
+      if (current.trim()) {
+        args.push(current.trim());
+      }
+      current = '';
+      continue;
+    }
+
+    current += char;
+  }
+
+  if (current.trim()) {
+    args.push(current.trim());
+  }
+
+  return args;
+}
+
+function extractCallArguments(callSnippet) {
+  const openParenIndex = callSnippet.indexOf('(');
+  if (openParenIndex === -1) {
+    return [];
+  }
+
+  const closeParenIndex = findMatchingParenthesis(callSnippet, openParenIndex);
+  if (closeParenIndex <= openParenIndex) {
+    return [];
+  }
+
+  const rawArgs = callSnippet.slice(openParenIndex + 1, closeParenIndex);
+  return splitTopLevelArguments(rawArgs);
+}
+
+function isQuotedStringLiteral(expression) {
+  const raw = String(expression || '').trim();
+  if (!raw) {
+    return false;
+  }
+  return (
+    (raw.startsWith("'") && raw.endsWith("'")) ||
+    (raw.startsWith('"') && raw.endsWith('"'))
+  );
+}
+
 function extractCallSnippet(content, startIndex) {
   const openParenIndex = content.indexOf('(', startIndex);
   if (openParenIndex === -1) {
@@ -855,21 +997,59 @@ function hasFilamentWidgetAuthorizationSignal(content) {
   return /\bstatic\s+function\s+canView\s*\(/.test(content) || /\bfunction\s+canView\s*\(/.test(content) || hasAuthorizationSignal(content);
 }
 
+function getStatementStartIndex(content, index) {
+  return (
+    Math.max(
+      content.lastIndexOf(';', index),
+      content.lastIndexOf('{', index),
+      content.lastIndexOf('}', index),
+    ) + 1
+  );
+}
+
+function getStatementEndIndex(content, index) {
+  const semicolonIndex = content.indexOf(';', index);
+  return semicolonIndex === -1 ? content.length : semicolonIndex + 1;
+}
+
+function extractGetReceiverVariable(statementSnippet) {
+  const receiverMatch = statementSnippet.match(/(\$[A-Za-z_][A-Za-z0-9_]*)\s*->\s*get\s*\(\s*\)/);
+  return receiverMatch ? receiverMatch[1] : null;
+}
+
+function hasReceiverBoundingCallInLookback(content, getIndex, receiverVariable) {
+  if (!receiverVariable) {
+    return false;
+  }
+
+  const lookbackStart = Math.max(0, getIndex - 2400);
+  const lookback = content.slice(lookbackStart, getIndex);
+  const receiverBoundRegex = new RegExp(
+    `${escapeRegExp(receiverVariable)}\\s*->\\s*(?:paginate|simplePaginate|cursorPaginate|limit|take|forPage|first|find|value|exists|count|max|min|avg|sum|pluck|chunk|chunkById|lazy|lazyById|cursor)\\s*\\(`,
+  );
+  return receiverBoundRegex.test(lookback);
+}
+
 function collectUnboundedGetLines(content) {
-  const lines = content.split('\n');
   const unbounded = [];
 
-  lines.forEach((lineContent, index) => {
-    if (!/->get\s*\(\s*\)/.test(lineContent)) {
-      return;
+  for (const match of content.matchAll(/->get\s*\(\s*\)/g)) {
+    const getIndex = match.index || 0;
+    const statementStart = getStatementStartIndex(content, getIndex);
+    const statementEnd = getStatementEndIndex(content, getIndex);
+    const statementSnippet = content.slice(statementStart, statementEnd);
+
+    if (QUERY_BOUNDING_CALL_REGEX.test(statementSnippet)) {
+      continue;
     }
 
-    if (/->(?:paginate|simplePaginate|cursorPaginate|limit|take|first|find|value|exists|count)\s*\(/.test(lineContent)) {
-      return;
+    const receiverVariable = extractGetReceiverVariable(statementSnippet);
+    if (hasReceiverBoundingCallInLookback(content, getIndex, receiverVariable)) {
+      continue;
     }
 
-    unbounded.push(index + 1);
-  });
+    unbounded.push(lineFromIndex(content, getIndex));
+  }
 
   return unbounded;
 }

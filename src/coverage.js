@@ -116,6 +116,13 @@ function aggregateFromFileIndex(fileIndex) {
     possibleNPlusOneRisks: 0,
     criticalWritesWithoutTransaction: 0,
     missingTests: 0,
+    testFiles: 0,
+    testCases: 0,
+    testAssertions: 0,
+    testMocks: 0,
+    testDataProviders: 0,
+    testEdgeCaseSignals: 0,
+    testFilesWithoutAssertions: 0,
   };
 
   const violations = [];
@@ -246,6 +253,71 @@ function computeAuthorizationScore({ metrics }) {
   );
 }
 
+function round2(value) {
+  return Number(Number(value || 0).toFixed(2));
+}
+
+function computeTestQuality({ metrics, presenceScore }) {
+  const testFiles = Number(metrics.testFiles || 0);
+  const testCases = Number(metrics.testCases || 0);
+  const testAssertions = Number(metrics.testAssertions || 0);
+  const testMocks = Number(metrics.testMocks || 0);
+  const testDataProviders = Number(metrics.testDataProviders || 0);
+  const testEdgeCaseSignals = Number(metrics.testEdgeCaseSignals || 0);
+  const testFilesWithoutAssertions = Number(metrics.testFilesWithoutAssertions || 0);
+
+  if (testFiles <= 0 || testCases <= 0) {
+    return {
+      score: clamp(Math.round(Number(presenceScore || 0)), 0, 100),
+      testFiles,
+      testCases,
+      assertionsPerCase: 0,
+      edgeSignalsPerCase: 0,
+      mocksPerCase: 0,
+      dataProvidersPerCase: 0,
+      noAssertionFilesRatio: 0,
+      confidence: 'low',
+    };
+  }
+
+  const assertionsPerCase = testAssertions / Math.max(1, testCases);
+  const edgeSignalsPerCase = testEdgeCaseSignals / Math.max(1, testCases);
+  const mocksPerCase = testMocks / Math.max(1, testCases);
+  const dataProvidersPerCase = testDataProviders / Math.max(1, testCases);
+  const noAssertionFilesRatio = testFilesWithoutAssertions / Math.max(1, testFiles);
+
+  let score = 100;
+
+  if (assertionsPerCase < 1) score -= 40;
+  else if (assertionsPerCase < 2) score -= 25;
+  else if (assertionsPerCase < 3) score -= 12;
+
+  if (edgeSignalsPerCase < 0.15) score -= 20;
+  else if (edgeSignalsPerCase < 0.35) score -= 10;
+
+  if (mocksPerCase > 2.2) score -= 18;
+  else if (mocksPerCase > 1.2) score -= 10;
+
+  score -= Math.round(noAssertionFilesRatio * 22);
+  score += Math.min(10, Math.round(dataProvidersPerCase * 20));
+
+  let confidence = 'low';
+  if (testCases >= 20) confidence = 'high';
+  else if (testCases >= 8) confidence = 'medium';
+
+  return {
+    score: clamp(Math.round(score), 0, 100),
+    testFiles,
+    testCases,
+    assertionsPerCase: round2(assertionsPerCase),
+    edgeSignalsPerCase: round2(edgeSignalsPerCase),
+    mocksPerCase: round2(mocksPerCase),
+    dataProvidersPerCase: round2(dataProvidersPerCase),
+    noAssertionFilesRatio: round2(noAssertionFilesRatio),
+    confidence,
+  };
+}
+
 function normalizeWeights(incoming = {}) {
   const defaults = {
     layering: 0.3,
@@ -298,9 +370,14 @@ function computeCoverage({ metrics, violations, scannedFiles, totalPhpFiles, mod
   const authorization = computeAuthorizationScore({ metrics });
 
   const testRelevantFiles = metrics.controllers + metrics.services + metrics.models;
-  const testabilityBase =
+  const testabilityPresence =
     testRelevantFiles > 0 ? Math.round(((testRelevantFiles - metrics.missingTests) / testRelevantFiles) * 100) : 100;
-  const testability = clamp(testabilityBase, 0, 100);
+  const testQuality = computeTestQuality({ metrics, presenceScore: clamp(testabilityPresence, 0, 100) });
+  const testability = clamp(
+    Math.round(clamp(testabilityPresence, 0, 100) * 0.72 + Number(testQuality.score || 0) * 0.28),
+    0,
+    100,
+  );
 
   const severityPenalty = violations.reduce((sum, item) => {
     const weight = SEVERITY_WEIGHTS[item.severity] || SEVERITY_WEIGHTS.low;
@@ -323,6 +400,7 @@ function computeCoverage({ metrics, violations, scannedFiles, totalPhpFiles, mod
     coverage: {
       overall,
       confidence,
+      testQuality,
       dimensions: {
         layering,
         validation,

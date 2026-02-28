@@ -62,6 +62,94 @@ function listTestBasenames(root) {
   return set;
 }
 
+function countMatches(content, regex) {
+  return Array.from(content.matchAll(regex)).length;
+}
+
+function countTestCases(content) {
+  const phpUnitPrefixed = countMatches(content, /\bfunction\s+test[A-Za-z0-9_]*\s*\(/g);
+  const pestItStyle = countMatches(content, /\bit\s*\(\s*['"`]/g);
+  const pestTestStyle = countMatches(content, /\btest\s*\(\s*['"`]/g);
+
+  let attributeBased = 0;
+  for (const match of content.matchAll(
+    /#\[\s*Test(?:\([^\)]*\))?\s*\][\s\r\n]*(?:public|protected|private)?\s*function\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(/g,
+  )) {
+    const methodName = String(match[1] || '');
+    if (!/^test/i.test(methodName)) {
+      attributeBased += 1;
+    }
+  }
+
+  return phpUnitPrefixed + attributeBased + pestItStyle + pestTestStyle;
+}
+
+function countAssertions(content) {
+  return countMatches(
+    content,
+    /(?:->assert[A-Z][A-Za-z0-9_]*\s*\(|\bassert[A-Z][A-Za-z0-9_]*\s*\(|\bexpectException(?:Message|Code)?\s*\(|\bexpect\s*\()/g,
+  );
+}
+
+function countMockSignals(content) {
+  return countMatches(
+    content,
+    /(?:Mockery::mock\s*\(|\$this->mock\s*\(|\$this->partialMock\s*\(|\bcreateMock\s*\(|->shouldReceive\s*\()/g,
+  );
+}
+
+function countDataProviderSignals(content) {
+  return (
+    countMatches(content, /@dataProvider\s+[A-Za-z_][A-Za-z0-9_]*/g) +
+    countMatches(content, /->with\s*\(/g)
+  );
+}
+
+function countEdgeCaseSignals(content) {
+  return countMatches(
+    content,
+    /\b(null|empty|invalid|exception|unauthorized|forbidden|expired|boundary|overflow|underflow|timeout|race|conflict|422|401|403|429)\b/gi,
+  );
+}
+
+function collectTestInsights(root) {
+  const testsDir = path.join(root, 'tests');
+  const insights = {
+    testFiles: 0,
+    testCases: 0,
+    testAssertions: 0,
+    testMocks: 0,
+    testDataProviders: 0,
+    testEdgeCaseSignals: 0,
+    testFilesWithoutAssertions: 0,
+  };
+
+  if (!fs.existsSync(testsDir)) {
+    return insights;
+  }
+
+  walkFiles(root, testsDir)
+    .filter((file) => file.endsWith('.php'))
+    .forEach((file) => {
+      const content = fs.readFileSync(file, 'utf8');
+      const fileCases = countTestCases(content);
+      const fileAssertions = countAssertions(content);
+
+      insights.testFiles += 1;
+      insights.testCases += fileCases;
+      insights.testAssertions += fileAssertions;
+      insights.testMocks += countMockSignals(content);
+      insights.testDataProviders += countDataProviderSignals(content);
+      insights.testEdgeCaseSignals += countEdgeCaseSignals(content);
+
+      if (fileCases > 0 && fileAssertions === 0) {
+        insights.testFilesWithoutAssertions += 1;
+      }
+    });
+
+  return insights;
+}
+
 function listChangedPhpFilesFromGit(root) {
   const gitProbe = spawnSync('git', ['rev-parse', '--is-inside-work-tree'], {
     cwd: root,
@@ -152,5 +240,6 @@ function resolveScanScope({ root, scope = 'changed', explicitFiles = [] }) {
 module.exports = {
   listPhpFiles,
   listTestBasenames,
+  collectTestInsights,
   resolveScanScope,
 };

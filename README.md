@@ -18,6 +18,7 @@ ACE makes this drift visible and measurable — without requiring any configurat
 - **Infers patterns**: detects your dominant patterns automatically instead of forcing conventions
 - **Tracks decisions**: formalize architectural decisions and rules that your team agreed on
 - **Stack-aware security**: evaluates Laravel, Filament, Livewire, Sanctum, Spatie Permission, and Horizon controls
+- **Runtime dependency audit**: surfaces Composer/NPM vulnerabilities directly in the report (with severity and fix hints)
 - **LLM-native**: MCP server lets Claude, Codex, Cursor, Copilot, or any MCP-compatible LLM query your architecture in real-time
 - **Incremental**: SHA1 cache means re-scans only analyze changed files
 - **Zero dependencies**: pure Node.js stdlib, runs everywhere Node 18+ runs
@@ -68,7 +69,7 @@ ACE computes an **AchCoverage** score (0–100%) from five weighted dimensions:
 |---|---|---|
 | **Layering** | 30% | Are controllers delegating to services consistently? Or using direct model calls consistently? ACE adapts to _your_ chosen pattern. |
 | **Validation** | 18% | FormRequest adoption vs inline validation. Penalizes `$request->all()` usage. |
-| **Testability** | 18% | Ratio of controllers/services/models/jobs/middlewares with corresponding tests. |
+| **Testability** | 18% | Test presence + quality signals (assertion density, edge-case coverage, mock pressure, test files without asserts). |
 | **Consistency** | 19% | Violation density weighted by severity. Fewer violations = higher consistency. |
 | **Authorization** | 15% | Authorization signals, model↔policy presence, and auth hygiene in state-changing route surfaces. |
 
@@ -107,7 +108,13 @@ ace report --lang=pt-BR           # Regenerate report in Portuguese (pt-BR)
 ace watch --interval=2200         # Watch for changes and re-scan
 ```
 
-The report includes an in-page language selector and pre-generates both localized files.
+The report includes:
+- in-page language selector (`en-US` / `pt-BR`)
+- trend correlations
+- evidence accordions per security control
+- clickable KPI cards (jump/filter by relevant panel)
+- dependency audit panel (Composer/NPM vulnerabilities)
+- pre-generated localized files for both languages
 
 ### Initialization & Config
 
@@ -314,6 +321,8 @@ The LLM always ends with a status line:
 
 ```
 AchCoverage: 74% (+2) | 2 new inconsistencies, 1 resolved
+Test quality: 81%
+Trend: improving | no regression alert
 Security: 82% | Report: .ace/report.html
 ```
 
@@ -418,6 +427,7 @@ ACE evaluates a security baseline tailored to your detected stack. Controls are 
 - Raw SQL injection risk (distinguishes safe vs unsafe usage)
 - Policy/authorization coverage
 - Route-level auth coverage
+- Runtime Composer dependency audit (when `composer.json`/`composer.lock` exists)
 
 ### Stack-specific controls
 - **Filament**: `canAccessPanel()`, page authorization, widget authorization
@@ -425,6 +435,7 @@ ACE evaluates a security baseline tailored to your detected stack. Controls are 
 - **Sanctum**: API guard configuration
 - **Spatie Permission**: permission/role enforcement
 - **Horizon**: dashboard protection
+- **NPM/Node stack**: runtime NPM audit (only when `package.json` exists)
 
 Each control reports `pass`, `warning`, `fail`, or `unknown` with a weighted score.
 
@@ -480,8 +491,8 @@ ACE uses heuristic-based analysis (regex + brace/parenthesis matching) to detect
 - Direct model calls in controllers
 - Fat controllers and long methods
 - `$request->all()` usage
-- Raw SQL with safe/unsafe distinction
-- `->get()` without constraints (unbounded queries)
+- Raw SQL with safe/unsafe distinction (bindings-aware; request input in bindings is treated as safe)
+- `->get()` without constraints (chain-aware, including multiline chains and bounded query variables)
 - N+1 query risks (lazy loading in loops)
 - Critical financial writes without `DB::transaction()`
 - Queue hygiene in jobs (`$tries`, `$timeout`, `failed()`, and uniqueness for critical jobs)
@@ -502,6 +513,7 @@ ACE uses heuristic-based analysis (regex + brace/parenthesis matching) to detect
 - Authorization signals in Filament Pages/Widgets
 - Livewire locked properties
 - Test file existence per controller/service/model/job/middleware
+- Test quality signals across `tests/` (assertions, mocks, edge-case coverage, data providers, files with zero asserts)
 
 ## Project Layout
 
@@ -533,6 +545,9 @@ ACE stores all artifacts in `.ace/`. Running `ace init` configures `.gitignore` 
 {
   "analysis": {
     "ignorePaths": ["app/Legacy", "app/Generated"],
+    "regressionThreshold": 5,
+    "trendWindow": 8,
+    "trendStableBand": 1.5,
     "thresholds": {
       "fatControllerLines": 220,
       "largeControllerMethodLines": 80,
@@ -561,6 +576,14 @@ ACE stores all artifacts in `.ace/`. Running `ace init` configures `.gitignore` 
       "testability": 0.18,
       "consistency": 0.19,
       "authorization": 0.15
+    }
+  },
+  "security": {
+    "audits": {
+      "composer": true,
+      "npm": true,
+      "timeoutMs": 15000,
+      "maxEntries": 120
     }
   },
   "report": {

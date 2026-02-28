@@ -24,6 +24,9 @@ test('initAceConfig creates default config', () => {
   const config = loadAceConfig(root);
   assert.ok(config.analysis.thresholds.fatControllerLines > 0);
   assert.equal(config.report.language, 'en-US');
+  assert.equal(config.security.audits.composer, true);
+  assert.equal(config.security.audits.npm, true);
+  assert.ok(config.security.audits.timeoutMs > 0);
   assert.ok(Array.isArray(config.waivers));
 });
 

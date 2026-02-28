@@ -1,7 +1,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
-const { resolveScanScope, listTestBasenames } = require('./discovery');
+const { resolveScanScope, listTestBasenames, collectTestInsights } = require('./discovery');
 const { analyzeFiles, ANALYZER_VERSION } = require('./analyzer');
 const { aggregateFromFileIndex, computeCoverage } = require('./coverage');
 const { buildSuggestions } = require('./suggestions');
@@ -14,12 +14,98 @@ const { writeReport } = require('./report');
 const { nowIso, toRelative } = require('./helpers');
 const { OUTPUT_SCHEMA_VERSION } = require('./constants');
 
+const DEFAULT_TREND_WINDOW = 8;
+const DEFAULT_TREND_STABLE_BAND = 1.5;
+const DEFAULT_REGRESSION_THRESHOLD = 5;
+
 function dedupeViolations(violations) {
   const map = new Map();
   for (const item of violations) {
     map.set(item.id, item);
   }
   return Array.from(map.values());
+}
+
+function toPositiveNumber(value, fallback) {
+  const numeric = Number(value);
+  if (Number.isNaN(numeric) || numeric <= 0) {
+    return fallback;
+  }
+  return numeric;
+}
+
+function toSeries(values = []) {
+  return values
+    .map((value) => Number(value))
+    .filter((value) => Number.isFinite(value));
+}
+
+function round(value) {
+  return Number(Number(value || 0).toFixed(2));
+}
+
+function summarizeSeriesTrend(series, { stableBand, regressionThreshold }) {
+  if (series.length < 2) {
+    return {
+      status: 'stable',
+      sampleSize: series.length,
+      deltaWindow: 0,
+      averageStep: 0,
+      lastStep: 0,
+      regression: {
+        triggered: false,
+        drop: 0,
+        threshold: regressionThreshold,
+      },
+    };
+  }
+
+  const first = series[0];
+  const last = series[series.length - 1];
+  const previous = series[series.length - 2];
+  const deltaWindow = round(last - first);
+  const averageStep = round(deltaWindow / (series.length - 1));
+  const lastStep = round(last - previous);
+  const drop = round(Math.max(0, previous - last));
+
+  let status = 'stable';
+  if (deltaWindow > stableBand) {
+    status = 'improving';
+  } else if (deltaWindow < -stableBand) {
+    status = 'degrading';
+  }
+
+  return {
+    status,
+    sampleSize: series.length,
+    deltaWindow,
+    averageStep,
+    lastStep,
+    regression: {
+      triggered: drop >= regressionThreshold,
+      drop,
+      threshold: regressionThreshold,
+    },
+  };
+}
+
+function evaluateTrend({ history, currentOverall, currentSecurityScore, settings = {} }) {
+  const trendWindow = Math.max(3, Math.round(toPositiveNumber(settings.window, DEFAULT_TREND_WINDOW)));
+  const stableBand = toPositiveNumber(settings.stableBand, DEFAULT_TREND_STABLE_BAND);
+  const regressionThreshold = toPositiveNumber(settings.regressionThreshold, DEFAULT_REGRESSION_THRESHOLD);
+
+  const points = [...(history || []), { overall: currentOverall, securityScore: currentSecurityScore }];
+  const recentPoints = points.slice(-trendWindow);
+  const coverageSeries = toSeries(recentPoints.map((item) => item.overall));
+  const securitySeries = toSeries(recentPoints.map((item) => item.securityScore));
+
+  return {
+    window: trendWindow,
+    stableBand,
+    regressionThreshold,
+    coverage: summarizeSeriesTrend(coverageSeries, { stableBand, regressionThreshold }),
+    security: summarizeSeriesTrend(securitySeries, { stableBand, regressionThreshold }),
+  };
 }
 
 function updateFileIndex({ state, scannedFiles, analyzedEntries, root }) {
@@ -51,11 +137,22 @@ function updateFileIndex({ state, scannedFiles, analyzedEntries, root }) {
 
 function createSummary({ state, newViolations, resolvedViolations, reportPath }) {
   const securityFails = Number(state.security?.totals?.fail || 0);
+  const coverageTrend = state.trend?.coverage || {};
+  const regression = coverageTrend.regression || {};
+  const testQualityScore = Number(state.coverage?.testQuality?.score || 0);
   return {
     schemaVersion: OUTPUT_SCHEMA_VERSION,
     achCoverage: state.coverage.overall,
     delta: state.coverage.delta,
     confidence: state.coverage.confidence,
+    testQualityScore,
+    trend: coverageTrend,
+    trendStatus: coverageTrend.status || 'stable',
+    regressionAlert: {
+      triggered: Boolean(regression.triggered),
+      drop: Number(regression.drop || 0),
+      threshold: Number(regression.threshold || 0),
+    },
     dominantPattern: state.model.dominantPattern,
     securityScore: Number(state.security?.score || 0),
     securityFailures: securityFails,
@@ -157,6 +254,7 @@ function runScan({ root, scope = 'changed', explicitFiles = [], writeHtml = true
   });
 
   const testBasenames = listTestBasenames(root);
+  const testInsights = collectTestInsights(root);
   const hashMap = Object.fromEntries(filesToAnalyze.map((item) => [item.relativePath, item.fileHash]));
   const rawAnalyzedEntries = analyzeFiles({
     root,
@@ -180,6 +278,10 @@ function runScan({ root, scope = 'changed', explicitFiles = [], writeHtml = true
   });
 
   const aggregate = aggregateFromFileIndex(nextFileIndex);
+  aggregate.metrics = {
+    ...aggregate.metrics,
+    ...testInsights,
+  };
   const patternModel = inferPatternModel({
     metrics: aggregate.metrics,
     decisions: previousState.decisions || [],
@@ -217,6 +319,8 @@ function runScan({ root, scope = 'changed', explicitFiles = [], writeHtml = true
     metrics: aggregate.metrics,
     violations: waiverApplied.violations,
     fileIndex: nextFileIndex,
+    previousSecurityMetadata: previousState.security?.metadata || {},
+    auditOptions: config.security?.audits || {},
   });
 
   const suggestions = buildSuggestions({
@@ -236,6 +340,16 @@ function runScan({ root, scope = 'changed', explicitFiles = [], writeHtml = true
   );
 
   const now = nowIso();
+  const trendPayload = evaluateTrend({
+    history: previousState.history || [],
+    currentOverall: coveragePayload.coverage.overall,
+    currentSecurityScore: securityPayload.score,
+    settings: {
+      window: config.analysis?.trendWindow,
+      stableBand: config.analysis?.trendStableBand,
+      regressionThreshold: config.analysis?.regressionThreshold,
+    },
+  });
   const nextState = {
     ...previousState,
     updatedAt: now,
@@ -245,6 +359,7 @@ function runScan({ root, scope = 'changed', explicitFiles = [], writeHtml = true
     },
     model: coveragePayload.model,
     security: securityPayload,
+    trend: trendPayload,
     violations: waiverApplied.violations,
     waivedViolations: waiverApplied.waivedViolations,
     suggestions,
@@ -258,6 +373,9 @@ function runScan({ root, scope = 'changed', explicitFiles = [], writeHtml = true
       ignoredFiles: files.length - scopedFiles.length,
       newViolations: newViolations.length,
       resolvedViolations: resolvedViolations.length,
+      trendStatus: trendPayload.coverage.status,
+      regressionAlert: Boolean(trendPayload.coverage.regression?.triggered),
+      testQualityScore: Number(coveragePayload.coverage?.testQuality?.score || 0),
       analyzedAt: now,
     },
     history: [
@@ -274,6 +392,12 @@ function runScan({ root, scope = 'changed', explicitFiles = [], writeHtml = true
         analyzedFiles: filesToAnalyze.length,
         newViolations: newViolations.length,
         resolvedViolations: resolvedViolations.length,
+        trendStatus: trendPayload.coverage.status,
+        regressionAlert: Boolean(trendPayload.coverage.regression?.triggered),
+        testability: Number(coveragePayload.coverage?.dimensions?.testability || 0),
+        testQuality: Number(coveragePayload.coverage?.testQuality?.score || 0),
+        violationCount: waiverApplied.violations.length,
+        securityFailures: Number(securityPayload.totals?.fail || 0),
       },
     ].slice(-160),
   };

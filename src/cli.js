@@ -203,9 +203,15 @@ async function resolveInitLlms(args) {
 
 function printSummary(summary) {
   const delta = summary.delta > 0 ? `+${summary.delta}` : `${summary.delta}`;
+  const trendStatus = summary.trendStatus || 'stable';
+  const regressionTag = summary.regressionAlert?.triggered
+    ? ` | regressão: -${summary.regressionAlert.drop} (threshold ${summary.regressionAlert.threshold})`
+    : '';
   console.log(
     `AchCoverage atualizado: ${summary.achCoverage}% (${delta}) | novas inconsistências: ${summary.newViolations} | resolvidas: ${summary.resolvedViolations}`,
   );
+  console.log(`Test quality: ${Number(summary.testQualityScore || 0)}%`);
+  console.log(`Trend: ${trendStatus}${regressionTag}`);
   console.log(
     `Security baseline: ${summary.securityScore}% | falhas: ${summary.securityFailures} | alertas: ${summary.securityWarnings}`,
   );
@@ -222,11 +228,20 @@ function statusPayload(root) {
   const config = loadAceConfig(root);
   const modules = state.security?.metadata?.modules || [];
   const enabledModules = modules.filter((item) => item.enabled);
+  const trend = state.trend?.coverage || {
+    status: 'stable',
+    regression: { triggered: false, drop: 0, threshold: 0 },
+  };
   return {
     schemaVersion: OUTPUT_SCHEMA_VERSION,
     achCoverage: state.coverage.overall,
     delta: state.coverage.delta,
     confidence: state.coverage.confidence,
+    testQuality: state.coverage.testQuality || {
+      score: 0,
+      confidence: 'low',
+    },
+    trend,
     dominantPattern: state.model.dominantPattern,
     security: {
       score: Number(state.security?.score || 0),
@@ -300,6 +315,10 @@ async function runCli(argv) {
 
     console.log(`AchCoverage: ${payload.achCoverage}% (${payload.delta >= 0 ? '+' : ''}${payload.delta})`);
     console.log(`Confiança: ${payload.confidence}%`);
+    console.log(`Test quality: ${Number(payload.testQuality?.score || 0)}% (${payload.testQuality?.confidence || 'low'})`);
+    console.log(
+      `Trend: ${payload.trend.status || 'stable'}${payload.trend?.regression?.triggered ? ` | regressão: -${payload.trend.regression.drop} (threshold ${payload.trend.regression.threshold})` : ''}`,
+    );
     console.log(`Pattern dominante: ${payload.dominantPattern}`);
     console.log(
       `Security baseline: ${payload.security.score}% | falhas: ${Number(payload.security.totals.fail || 0)} | alertas: ${Number(payload.security.totals.warning || 0)}`,

@@ -235,3 +235,48 @@ test('computeCoverage normalizes custom weights', () => {
 
   assert.equal(result.coverage.overall, 68);
 });
+
+test('computeCoverage blends test quality signals into testability', () => {
+  const metrics = {
+    controllers: 4,
+    services: 4,
+    models: 2,
+    missingTests: 0,
+    controllersUsingService: 4,
+    controllersWithDirectModel: 0,
+    controllersUsingFormRequest: 4,
+    directModelCalls: 0,
+    fatControllers: 0,
+    largeControllerMethods: 0,
+    requestAllCalls: 0,
+    testFiles: 3,
+    testCases: 12,
+    testAssertions: 12,
+    testMocks: 18,
+    testDataProviders: 0,
+    testEdgeCaseSignals: 1,
+    testFilesWithoutAssertions: 1,
+  };
+
+  const result = computeCoverage({
+    metrics,
+    violations: [],
+    scannedFiles: 20,
+    totalPhpFiles: 20,
+    model: {
+      dominantPattern: 'service-layer',
+      patterns: {
+        'controller.data_access': { expected: 'service-layer' },
+        'controller.validation': { expected: 'form-request' },
+      },
+      decisionCount: 0,
+    },
+  });
+
+  assert.equal(result.coverage.testQuality.score, 38);
+  assert.equal(result.coverage.testQuality.confidence, 'medium');
+  assert.equal(result.coverage.testQuality.assertionsPerCase, 1);
+  assert.equal(result.coverage.testQuality.mocksPerCase, 1.5);
+  assert.ok(result.coverage.dimensions.testability < 100);
+  assert.equal(result.coverage.dimensions.testability, 83);
+});

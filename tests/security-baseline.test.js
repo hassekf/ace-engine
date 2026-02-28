@@ -35,6 +35,10 @@ function runBaseline(root, files) {
     metrics: aggregate.metrics,
     violations: aggregate.violations,
     fileIndex,
+    auditOptions: {
+      composer: false,
+      npm: false,
+    },
   });
 }
 
@@ -258,4 +262,160 @@ class HorizonServiceProvider extends \\\\Illuminate\\\\Support\\\\ServiceProvide
   assert.equal(baseline.metadata.optionalStacks.spatiePermission, true);
   assert.equal(baseline.metadata.optionalStacks.sanctum, true);
   assert.equal(baseline.metadata.optionalStacks.horizon, true);
+});
+
+test('security baseline integrates composer runtime audit vulnerabilities', () => {
+  const root = makeTmpRoot();
+  writeJson(path.join(root, 'composer.json'), {
+    require: {
+      'laravel/framework': '^11.0',
+    },
+  });
+  writeJson(path.join(root, 'composer.lock'), {
+    packages: [],
+    'packages-dev': [],
+  });
+
+  const baseline = evaluateSecurityBaseline({
+    root,
+    metrics: {},
+    violations: [],
+    fileIndex: {},
+    auditOptions: {
+      composer: true,
+      npm: false,
+      timeoutMs: 5000,
+      maxEntries: 20,
+    },
+    commandRunner(command) {
+      if (command !== 'composer') {
+        return { status: 0, stdout: '{}', stderr: '' };
+      }
+      return {
+        status: 1,
+        stdout: JSON.stringify({
+          advisories: {
+            'laravel/framework': [
+              {
+                advisoryId: 'PKSA-123',
+                title: 'Test advisory',
+                cve: 'CVE-2026-0001',
+                severity: 'high',
+                link: 'https://example.test/advisory',
+                affectedVersions: '<11.50.0',
+              },
+            ],
+          },
+        }),
+        stderr: '',
+      };
+    },
+  });
+
+  const runtimeControl = controlById(baseline, 'dependencies.composer_runtime_audit');
+  assert.ok(runtimeControl, 'runtime composer audit control should exist');
+  assert.equal(runtimeControl.status, 'fail');
+  assert.equal(runtimeControl.evidence.vulnerabilities, 1);
+  assert.equal(runtimeControl.evidence.high, 1);
+  assert.equal(baseline.metadata.dependencyAudits.composer.summary.total, 1);
+  assert.equal(baseline.metadata.dependencyAudits.composer.vulnerabilities[0].cve, 'CVE-2026-0001');
+});
+
+test('security baseline only includes npm runtime audit when package manifests are present', () => {
+  const rootWithoutNode = makeTmpRoot();
+  writeJson(path.join(rootWithoutNode, 'composer.json'), {
+    require: {
+      'laravel/framework': '^11.0',
+    },
+  });
+  writeJson(path.join(rootWithoutNode, 'composer.lock'), {
+    packages: [],
+    'packages-dev': [],
+  });
+
+  const withoutNodeBaseline = evaluateSecurityBaseline({
+    root: rootWithoutNode,
+    metrics: {},
+    violations: [],
+    fileIndex: {},
+    auditOptions: {
+      composer: false,
+      npm: true,
+    },
+    commandRunner() {
+      return { status: 0, stdout: '{}', stderr: '' };
+    },
+  });
+
+  assert.equal(Boolean(controlById(withoutNodeBaseline, 'dependencies.npm_runtime_audit')), false);
+
+  const rootWithNode = makeTmpRoot();
+  writeJson(path.join(rootWithNode, 'composer.json'), {
+    require: {
+      'laravel/framework': '^11.0',
+    },
+  });
+  writeJson(path.join(rootWithNode, 'composer.lock'), {
+    packages: [],
+    'packages-dev': [],
+  });
+  writeJson(path.join(rootWithNode, 'package.json'), {
+    name: 'ace-runtime-test',
+    private: true,
+  });
+  writeJson(path.join(rootWithNode, 'package-lock.json'), {
+    name: 'ace-runtime-test',
+    lockfileVersion: 3,
+    packages: {},
+  });
+
+  const withNodeBaseline = evaluateSecurityBaseline({
+    root: rootWithNode,
+    metrics: {},
+    violations: [],
+    fileIndex: {},
+    auditOptions: {
+      composer: false,
+      npm: true,
+      timeoutMs: 5000,
+    },
+    commandRunner(command) {
+      if (command !== 'npm') {
+        return { status: 0, stdout: '{}', stderr: '' };
+      }
+      return {
+        status: 1,
+        stdout: JSON.stringify({
+          vulnerabilities: {
+            lodash: {
+              name: 'lodash',
+              severity: 'moderate',
+              via: [
+                {
+                  source: 777001,
+                  name: 'lodash',
+                  title: 'Prototype pollution',
+                  severity: 'moderate',
+                  url: 'https://example.test/npm-advisory',
+                  range: '<4.17.21',
+                },
+              ],
+              fixAvailable: {
+                name: 'lodash',
+                version: '4.17.21',
+                isSemVerMajor: false,
+              },
+            },
+          },
+        }),
+        stderr: '',
+      };
+    },
+  });
+
+  const npmControl = controlById(withNodeBaseline, 'dependencies.npm_runtime_audit');
+  assert.ok(npmControl, 'runtime npm audit control should exist');
+  assert.equal(npmControl.status, 'warning');
+  assert.equal(npmControl.evidence.vulnerabilities, 1);
+  assert.equal(withNodeBaseline.metadata.dependencyAudits.npm.summary.total, 1);
 });

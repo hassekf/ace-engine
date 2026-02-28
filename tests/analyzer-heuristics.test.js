@@ -62,6 +62,50 @@ class WalletPayoutService
   assert.equal(entry.metrics.criticalWritesWithoutTransaction, 1);
 });
 
+test('analyzer ignores bounded get chains split across multiple lines', () => {
+  const root = makeTmpRoot();
+  const file = path.join(root, 'app', 'Services', 'PaginatedUsersService.php');
+
+  writePhp(
+    file,
+    `<?php
+namespace App\\Services;
+
+use App\\Models\\User;
+
+class PaginatedUsersService
+{
+    public function run()
+    {
+        $users = User::query()
+            ->where('active', true)
+            ->limit(100)
+            ->get();
+
+        $query = User::query()->where('active', true);
+        $query->take(25);
+        $alsoBounded = $query->get();
+
+        return [$users, $alsoBounded];
+    }
+}
+`,
+  );
+
+  const payload = analyzeFiles({
+    root,
+    files: [file],
+    testBasenames: new Set(),
+    thresholds: {},
+  });
+
+  const entry = payload['app/Services/PaginatedUsersService.php'];
+  assert.ok(entry, 'entry should exist');
+  assert.equal(entry.metrics.unboundedGetCalls, 0);
+  const types = new Set((entry.violations || []).map((item) => item.type));
+  assert.ok(!types.has('unbounded-get-query'));
+});
+
 test('analyzer counts constructor-injected Action/UseCase as service usage in controller and classifies app/Actions as service kind', () => {
   const root = makeTmpRoot();
   const controllerFile = path.join(root, 'app', 'Http', 'Controllers', 'AccountController.php');
@@ -244,6 +288,47 @@ class BillingQueryService
   const types = new Set((entry.violations || []).map((item) => item.type));
   assert.ok(types.has('dynamic-raw-sql'));
   assert.ok(types.has('raw-sql-review'));
+});
+
+test('analyzer treats request input in bindings as safe raw SQL', () => {
+  const root = makeTmpRoot();
+  const file = path.join(root, 'app', 'Services', 'SafeRawBindingsService.php');
+
+  writePhp(
+    file,
+    `<?php
+namespace App\\Services;
+
+use Illuminate\\Http\\Request;
+use Illuminate\\Support\\Facades\\DB;
+
+class SafeRawBindingsService
+{
+    public function run(Request $request, string $status)
+    {
+        $safeWithRequest = DB::selectRaw('SUM(amount) as total WHERE status = ?', [$request->input('status')]);
+        $safeWithVariable = DB::selectRaw('SUM(amount) as total WHERE status = ?', [$status]);
+        $unsafeDynamic = DB::raw($request->input('sql_fragment'));
+
+        return [$safeWithRequest, $safeWithVariable, $unsafeDynamic];
+    }
+}
+`,
+  );
+
+  const payload = analyzeFiles({
+    root,
+    files: [file],
+    testBasenames: new Set(),
+    thresholds: {},
+  });
+
+  const entry = payload['app/Services/SafeRawBindingsService.php'];
+  assert.ok(entry, 'entry should exist');
+  assert.equal(entry.metrics.rawSqlCalls, 3);
+  assert.equal(entry.metrics.safeRawSqlCalls, 2);
+  assert.equal(entry.metrics.unsafeRawSqlCalls, 1);
+  assert.equal(entry.metrics.dynamicRawSql, 1);
 });
 
 test('analyzer classifies policies as dedicated kind', () => {
