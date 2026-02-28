@@ -1,0 +1,1205 @@
+const fs = require('node:fs');
+const path = require('node:path');
+const { lineFromIndex, normalizePath, slugify } = require('./helpers');
+
+const ANALYZER_VERSION = 10;
+
+function createMetrics() {
+  return {
+    scannedPhpFiles: 1,
+    controllers: 0,
+    controllersUsingService: 0,
+    controllersWithDirectModel: 0,
+    controllersUsingFormRequest: 0,
+    directModelCalls: 0,
+    modelAllCallsInController: 0,
+    requestAllCalls: 0,
+    fatControllers: 0,
+    largeControllerMethods: 0,
+    services: 0,
+    modelAllCallsInService: 0,
+    commands: 0,
+    modelAllCallsInCommand: 0,
+    fatCommands: 0,
+    models: 0,
+    policies: 0,
+    fatModels: 0,
+    filamentResources: 0,
+    fatFilamentResources: 0,
+    filamentPages: 0,
+    fatFilamentPages: 0,
+    filamentPagesWithAuth: 0,
+    filamentWidgets: 0,
+    fatFilamentWidgets: 0,
+    filamentWidgetsWithAuth: 0,
+    routeFiles: 0,
+    routeFilesWithAuth: 0,
+    routeFilesWithThrottle: 0,
+    routeFilesWithoutCsrf: 0,
+    stateChangingRouteFilesWithoutAuth: 0,
+    stateChangingRouteFilesWithoutThrottle: 0,
+    livewireComponents: 0,
+    livewirePublicProperties: 0,
+    livewireLockedProperties: 0,
+    authorizationChecks: 0,
+    canAccessPanelCalls: 0,
+    rawSqlCalls: 0,
+    unsafeRawSqlCalls: 0,
+    safeRawSqlCalls: 0,
+    dynamicRawSql: 0,
+    dangerousSinkCalls: 0,
+    uploadHandlingMentions: 0,
+    uploadValidationMentions: 0,
+    webhookHandlingMentions: 0,
+    webhookSignatureMentions: 0,
+    hasFilamentPageAuth: false,
+    hasFilamentWidgetAuth: false,
+    unboundedGetCalls: 0,
+    possibleNPlusOneRisks: 0,
+    criticalWritesWithoutTransaction: 0,
+    missingTests: 0,
+  };
+}
+
+function createSignals() {
+  return {
+    usesService: false,
+    usesFormRequest: false,
+    directModelCalls: [],
+    requestAllCalls: [],
+    modelAllCalls: [],
+    dynamicRawSqlLines: [],
+    rawSqlLines: [],
+    dangerousSinkCalls: [],
+    fileLineCount: 0,
+    largeMethodCount: 0,
+    methodCount: 0,
+    hasRouteAuth: false,
+    hasRouteThrottle: false,
+    hasRouteWithoutCsrf: false,
+    hasStateChangingRoute: false,
+    livewirePublicPropertyCount: 0,
+    livewireLockedPropertyCount: 0,
+    authorizationChecks: 0,
+    canAccessPanelCalls: 0,
+    uploadHandlingMentions: 0,
+    uploadValidationMentions: 0,
+    webhookHandlingMentions: 0,
+    webhookSignatureMentions: 0,
+    unboundedGetLines: [],
+    hasEagerLoading: false,
+    loopRelationAccessCount: 0,
+    hasDbTransaction: false,
+    hasCriticalWrite: false,
+    hasTest: false,
+  };
+}
+
+function threshold(thresholds, key, fallback) {
+  const candidate = Number(thresholds?.[key]);
+  if (Number.isNaN(candidate) || candidate <= 0) {
+    return fallback;
+  }
+  return candidate;
+}
+
+function detectKind(relativePath, content) {
+  const normalized = normalizePath(relativePath);
+
+  if (normalized.startsWith('routes/') && normalized.endsWith('.php')) {
+    return 'route-file';
+  }
+
+  if (normalized.includes('/Http/Controllers/')) {
+    return 'controller';
+  }
+
+  if (normalized.includes('/Services/')) {
+    return 'service';
+  }
+
+  if (normalized.includes('/Actions/') || normalized.includes('/UseCases/')) {
+    return 'service';
+  }
+
+  if (normalized.includes('/Console/Commands/')) {
+    return 'command';
+  }
+
+  if (normalized.includes('/Filament/') && normalized.includes('/Resources/')) {
+    return 'filament-resource';
+  }
+
+  if (normalized.includes('/Filament/') && normalized.includes('/Pages/')) {
+    return 'filament-page';
+  }
+
+  if (normalized.includes('/Filament/') && normalized.includes('/Widgets/')) {
+    return 'filament-widget';
+  }
+
+  if (normalized.includes('/Livewire/')) {
+    return 'livewire-component';
+  }
+
+  if (normalized.includes('/Models/')) {
+    return 'model';
+  }
+
+  if (normalized.includes('/Policies/') || normalized.endsWith('Policy.php')) {
+    return 'policy';
+  }
+
+  if (normalized.includes('/Http/Requests/')) {
+    return 'request';
+  }
+
+  if (/extends\s+Controller\b/.test(content)) {
+    return 'controller';
+  }
+
+  if (/extends\s+Model\b/.test(content)) {
+    return 'model';
+  }
+
+  if (/class\s+[A-Za-z0-9_]+Policy\b/.test(content)) {
+    return 'policy';
+  }
+
+  if (/extends\s+Command\b/.test(content)) {
+    return 'command';
+  }
+
+  if (/extends\s+Resource\b/.test(content)) {
+    return 'filament-resource';
+  }
+
+  if (/extends\s+Component\b/.test(content) && /Livewire/i.test(content)) {
+    return 'livewire-component';
+  }
+
+  if (/extends\s+FormRequest\b/.test(content)) {
+    return 'request';
+  }
+
+  return 'other';
+}
+
+function collectImports(content) {
+  const imports = [];
+  const regex = /^use\s+([^;]+);/gm;
+
+  for (const match of content.matchAll(regex)) {
+    const raw = match[1].trim();
+    const aliasMatch = raw.split(/\s+as\s+/i);
+    const fqcn = aliasMatch[0].trim();
+    const alias = (aliasMatch[1] || fqcn.split('\\').pop()).trim();
+    imports.push({ fqcn, alias });
+  }
+
+  return imports;
+}
+
+function collectImportedModelAliases(content) {
+  return new Set(
+    collectImports(content)
+      .filter((item) => item.fqcn.startsWith('App\\Models\\'))
+      .map((item) => item.alias),
+  );
+}
+
+function collectModelStaticCalls(content, modelAliases) {
+  const calls = [];
+  for (const match of content.matchAll(/\b([A-Z][A-Za-z0-9_]*)::([A-Za-z_][A-Za-z0-9_]*)\s*\(/g)) {
+    const className = match[1];
+    const method = match[2];
+    if (!modelAliases.has(className)) {
+      continue;
+    }
+    calls.push({
+      className,
+      method,
+      line: lineFromIndex(content, match.index),
+    });
+  }
+  return calls;
+}
+
+function analyzeDynamicRawSql({ relativePath, content, metrics, signals, violations }) {
+  const matcher = /\b(?:DB::raw|selectRaw|whereRaw|orWhereRaw|orderByRaw|havingRaw)\s*\(/g;
+  let reviewLine = null;
+  let reviewCount = 0;
+
+  for (const match of content.matchAll(matcher)) {
+    const line = lineFromIndex(content, match.index);
+    const callSnippet = extractCallSnippet(content, match.index);
+    const hasVariableInSqlLiteral = /['"`][^'"`]*\$\w+[^'"`]*['"`]/.test(callSnippet);
+    const hasTemplateInterpolation = /\{\$[A-Za-z_]/.test(callSnippet);
+    const hasConcat = /(?:['"`]\s*\.\s*\$|\$\w+\s*\.)/.test(callSnippet);
+    const hasRequestInput = /\$(?:request|input|data|payload)|\brequest\s*\(|\binput\s*\(/i.test(callSnippet);
+    const hasBindingsArray = /,\s*(?:\[[\s\S]*?\]|array\s*\()/i.test(callSnippet);
+    const hasPlaceholder = /['"`][^'"`]*\?[^'"`]*['"`]/.test(callSnippet);
+
+    metrics.rawSqlCalls += 1;
+    signals.rawSqlLines.push(line);
+
+    const isUnsafe =
+      hasVariableInSqlLiteral ||
+      hasTemplateInterpolation ||
+      hasConcat ||
+      hasRequestInput ||
+      (hasPlaceholder && !hasBindingsArray);
+
+    if (isUnsafe) {
+      metrics.unsafeRawSqlCalls += 1;
+      metrics.dynamicRawSql += 1;
+      signals.dynamicRawSqlLines.push(line);
+      reviewLine = reviewLine || line;
+      reviewCount += 1;
+
+      violations.push(
+        createViolation({
+          type: 'dynamic-raw-sql',
+          severity: 'medium',
+          file: relativePath,
+          line,
+          message: 'Raw SQL potencialmente dinâmico/inseguro detectado',
+          rationale: 'Interpolação/concatenação em raw SQL pode introduzir risco de SQL injection e regressões de query.',
+          suggestion: 'Prefira bindings (`?` + array) ou Query Builder sem concatenação dinâmica.',
+        }),
+      );
+    } else {
+      metrics.safeRawSqlCalls += 1;
+    }
+  }
+
+  if (reviewLine != null) {
+    violations.push(
+      createViolation({
+        type: 'raw-sql-review',
+        severity: 'low',
+        file: relativePath,
+        line: reviewLine,
+        message: `${reviewCount} uso(s) de SQL raw exigem revisão contextual`,
+        rationale: 'Pontos raw com sinais dinâmicos devem ser revisados para segurança e previsibilidade.',
+        suggestion: 'Confirme bindings, whitelists e limites explícitos.',
+      }),
+    );
+  }
+}
+
+function createViolation({ type, severity, file, line, message, suggestion, rationale = '' }) {
+  const id = slugify(`${type}:${file}:${line}:${message}`);
+
+  return {
+    id,
+    type,
+    severity,
+    file,
+    line,
+    message,
+    suggestion,
+    rationale,
+  };
+}
+
+function findMatchingDelimiter(text, openIndex, openChar, closeChar) {
+  let depth = 0;
+  let inSingleQuote = false;
+  let inDoubleQuote = false;
+  let inLineComment = false;
+  let inBlockComment = false;
+  let escapeNext = false;
+
+  for (let index = openIndex; index < text.length; index += 1) {
+    const char = text[index];
+    const nextChar = text[index + 1];
+
+    if (inLineComment) {
+      if (char === '\n') {
+        inLineComment = false;
+      }
+      continue;
+    }
+
+    if (inBlockComment) {
+      if (char === '*' && nextChar === '/') {
+        inBlockComment = false;
+        index += 1;
+      }
+      continue;
+    }
+
+    if (inSingleQuote) {
+      if (!escapeNext && char === "'") {
+        inSingleQuote = false;
+      }
+      escapeNext = !escapeNext && char === '\\';
+      continue;
+    }
+
+    if (inDoubleQuote) {
+      if (!escapeNext && char === '"') {
+        inDoubleQuote = false;
+      }
+      escapeNext = !escapeNext && char === '\\';
+      continue;
+    }
+
+    if (char === '/' && nextChar === '/') {
+      inLineComment = true;
+      index += 1;
+      continue;
+    }
+
+    if (char === '/' && nextChar === '*') {
+      inBlockComment = true;
+      index += 1;
+      continue;
+    }
+
+    if (char === "'") {
+      inSingleQuote = true;
+      escapeNext = false;
+      continue;
+    }
+
+    if (char === '"') {
+      inDoubleQuote = true;
+      escapeNext = false;
+      continue;
+    }
+
+    if (char === openChar) {
+      depth += 1;
+    } else if (char === closeChar) {
+      depth -= 1;
+      if (depth === 0) {
+        return index;
+      }
+    }
+  }
+
+  return text.length - 1;
+}
+
+function findMatchingBrace(text, openBraceIndex) {
+  return findMatchingDelimiter(text, openBraceIndex, '{', '}');
+}
+
+function findMatchingParenthesis(text, openParenIndex) {
+  return findMatchingDelimiter(text, openParenIndex, '(', ')');
+}
+
+function extractCallSnippet(content, startIndex) {
+  const openParenIndex = content.indexOf('(', startIndex);
+  if (openParenIndex === -1) {
+    return content.slice(startIndex, Math.min(content.length, startIndex + 300));
+  }
+  const closeParenIndex = findMatchingParenthesis(content, openParenIndex);
+  return content.slice(startIndex, closeParenIndex + 1);
+}
+
+function extractFunctionBlocks(content) {
+  const blocks = [];
+  const regex = /function\s+[A-Za-z0-9_]+\s*\([^)]*\)\s*(?::\s*[^\{\n]+)?\s*\{/g;
+  let match = regex.exec(content);
+
+  while (match) {
+    const start = match.index || 0;
+    const openBraceIndex = content.indexOf('{', start);
+    if (openBraceIndex === -1) {
+      break;
+    }
+
+    const closeBraceIndex = findMatchingBrace(content, openBraceIndex);
+    const fragment = content.slice(start, closeBraceIndex + 1);
+    blocks.push({
+      start,
+      end: closeBraceIndex,
+      line: lineFromIndex(content, start),
+      lines: fragment.split('\n').length,
+    });
+
+    regex.lastIndex = closeBraceIndex + 1;
+    match = regex.exec(content);
+  }
+
+  return blocks;
+}
+
+function analyzeDangerousSinks({ relativePath, content, metrics, signals, violations }) {
+  const regex = /\b(unserialize|eval|assert|shell_exec|exec|passthru|proc_open|popen)\s*\(/g;
+
+  for (const match of content.matchAll(regex)) {
+    const sink = match[1];
+    const line = lineFromIndex(content, match.index);
+    metrics.dangerousSinkCalls += 1;
+    signals.dangerousSinkCalls.push({
+      sink,
+      line,
+    });
+
+    violations.push(
+      createViolation({
+        type: 'dangerous-php-sink',
+        severity: 'high',
+        file: relativePath,
+        line,
+        message: `Uso de sink perigoso detectado: ${sink}()`,
+        rationale: 'Sinks de execução/desserialização exigem validação rígida para evitar RCE e abuse.',
+        suggestion: 'Evite sink direto; aplique allowlist/validação estrita e isolamento operacional.',
+      }),
+    );
+  }
+}
+
+function analyzeCommonSecuritySignals({ content, metrics, signals }) {
+  const authorizationChecks = Array.from(
+    content.matchAll(/\$this->authorize\s*\(|Gate::(?:authorize|allows|denies|check)\s*\(|->can\s*\(/g),
+  ).length;
+  metrics.authorizationChecks += authorizationChecks;
+  signals.authorizationChecks = authorizationChecks;
+
+  const canAccessPanelCalls = Array.from(content.matchAll(/\bcanAccessPanel\s*\(/g)).length;
+  metrics.canAccessPanelCalls += canAccessPanelCalls;
+  signals.canAccessPanelCalls = canAccessPanelCalls;
+
+  const uploadHandlingMentions = Array.from(
+    content.matchAll(/\b(?:storeAs|putFile|putFileAs|UploadedFile|upload)\b/gi),
+  ).length;
+  const uploadValidationMentions = Array.from(
+    content.matchAll(/\b(?:mimes:|mimetypes:|image\b|max:\d+|dimensions:)\b/gi),
+  ).length;
+  metrics.uploadHandlingMentions += uploadHandlingMentions;
+  metrics.uploadValidationMentions += uploadValidationMentions;
+  signals.uploadHandlingMentions = uploadHandlingMentions;
+  signals.uploadValidationMentions = uploadValidationMentions;
+
+  const webhookHandlingMentions = Array.from(content.matchAll(/\bwebhook\b/gi)).length;
+  const webhookSignatureMentions = Array.from(
+    content.matchAll(/\b(?:hash_hmac|x-signature|signature|verifySignature|signed)\b/gi),
+  ).length;
+  metrics.webhookHandlingMentions += webhookHandlingMentions;
+  metrics.webhookSignatureMentions += webhookSignatureMentions;
+  signals.webhookHandlingMentions = webhookHandlingMentions;
+  signals.webhookSignatureMentions = webhookSignatureMentions;
+}
+
+function hasAuthorizationSignal(content) {
+  return (
+    /\$this->authorize\s*\(/.test(content) ||
+    /Gate::(?:authorize|allows|denies|check|any|none)\s*\(/.test(content) ||
+    /auth\s*\(\)\s*->user\s*\(\)\s*->can\s*\(/.test(content) ||
+    /->can\s*\(/.test(content) ||
+    /\bcanAccessPanel\s*\(/.test(content)
+  );
+}
+
+function hasFilamentPageAuthorizationSignal(content) {
+  return (
+    /\bstatic\s+function\s+canAccess\s*\(/.test(content) ||
+    /\bfunction\s+canAccess\s*\(/.test(content) ||
+    /\bstatic\s+function\s+shouldRegisterNavigation\s*\(/.test(content) ||
+    hasAuthorizationSignal(content)
+  );
+}
+
+function hasFilamentWidgetAuthorizationSignal(content) {
+  return /\bstatic\s+function\s+canView\s*\(/.test(content) || /\bfunction\s+canView\s*\(/.test(content) || hasAuthorizationSignal(content);
+}
+
+function collectUnboundedGetLines(content) {
+  const lines = content.split('\n');
+  const unbounded = [];
+
+  lines.forEach((lineContent, index) => {
+    if (!/->get\s*\(\s*\)/.test(lineContent)) {
+      return;
+    }
+
+    if (/->(?:paginate|simplePaginate|cursorPaginate|limit|take|first|find|value|exists|count)\s*\(/.test(lineContent)) {
+      return;
+    }
+
+    unbounded.push(index + 1);
+  });
+
+  return unbounded;
+}
+
+function detectLoopRelationAccessCount(content) {
+  const variables = [];
+  for (const match of content.matchAll(/foreach\s*\([^)]*?\bas\s*(?:\$\w+\s*=>\s*)?&?\$([A-Za-z_][A-Za-z0-9_]*)/g)) {
+    variables.push(match[1]);
+  }
+
+  if (variables.length === 0) {
+    return 0;
+  }
+
+  let count = 0;
+  for (const variable of variables) {
+    const relationRegex = new RegExp(`\\$${variable}->[A-Za-z_][A-Za-z0-9_]*->`, 'g');
+    count += Array.from(content.matchAll(relationRegex)).length;
+  }
+  return count;
+}
+
+function analyzeQueryDiscipline({ relativePath, content, metrics, signals, violations, sourceKind }) {
+  const unboundedGetLines = collectUnboundedGetLines(content);
+  signals.unboundedGetLines = unboundedGetLines;
+  signals.hasEagerLoading = /\b(?:->|::)(?:with|load|loadMissing)\s*\(/.test(content);
+  signals.loopRelationAccessCount = detectLoopRelationAccessCount(content);
+
+  metrics.unboundedGetCalls += unboundedGetLines.length;
+  if (unboundedGetLines.length > 0) {
+    violations.push(
+      createViolation({
+        type: 'unbounded-get-query',
+        severity: sourceKind === 'controller' ? 'medium' : 'low',
+        file: relativePath,
+        line: unboundedGetLines[0],
+        message: `${unboundedGetLines.length} consulta(s) com \`->get()\` sem limite/paginação detectada(s)`,
+        rationale: 'Consultas sem limite podem causar consumo excessivo de memória e latência em crescimento de dados.',
+        suggestion: 'Prefira paginação (`paginate/cursorPaginate`) ou limite explícito para consultas potencialmente grandes.',
+      }),
+    );
+  }
+
+  if (signals.loopRelationAccessCount > 0 && !signals.hasEagerLoading) {
+    metrics.possibleNPlusOneRisks += 1;
+    violations.push(
+      createViolation({
+        type: 'possible-n-plus-one',
+        severity: 'low',
+        file: relativePath,
+        line: 1,
+        message: 'Acesso a relações dentro de loop sem sinal de eager loading',
+        rationale: 'Relações acessadas em loop sem `with/load` tendem a gerar N+1 queries.',
+        suggestion: 'Avalie eager loading (`with/load`) antes do loop para reduzir round-trips ao banco.',
+      }),
+    );
+  }
+}
+
+function analyzeCriticalWriteTransaction({ relativePath, content, metrics, signals, violations }) {
+  const hasFinancialContext = /\b(withdraw|withdrawal|deposit|wallet|payment|transfer|balance|rollover|cashback|billing)\b/i.test(
+    relativePath + '\n' + content,
+  );
+  const hasCriticalWrite = /(?:DB::table\s*\([^)]*\)->(?:insert|update|delete)|::create\s*\(|->(?:create|update|delete|save|increment|decrement)\s*\()/.test(
+    content,
+  );
+  const hasDbTransaction = /\bDB::transaction\s*\(/.test(content);
+
+  signals.hasCriticalWrite = hasCriticalWrite;
+  signals.hasDbTransaction = hasDbTransaction;
+
+  if (!hasFinancialContext || !hasCriticalWrite || hasDbTransaction) {
+    return;
+  }
+
+  metrics.criticalWritesWithoutTransaction += 1;
+  violations.push(
+    createViolation({
+      type: 'critical-write-without-transaction',
+      severity: 'medium',
+      file: relativePath,
+      line: 1,
+      message: 'Operação crítica de escrita sem sinal de transação detectada',
+      rationale: 'Fluxos financeiros/de saldo sem transação explícita aumentam risco de inconsistência em concorrência/falhas parciais.',
+      suggestion: 'Considere encapsular o fluxo em `DB::transaction(...)` e reforçar idempotência.',
+    }),
+  );
+}
+
+function analyzeController({ relativePath, content, metrics, signals, violations, testBasenames, thresholds }) {
+  metrics.controllers = 1;
+  signals.fileLineCount = content.split('\n').length;
+
+  const imports = collectImports(content);
+  const importedModels = imports
+    .filter((item) => item.fqcn.startsWith('App\\Models\\'))
+    .map((item) => item.alias);
+  const importedServices = imports
+    .filter(
+      (item) =>
+        item.fqcn.startsWith('App\\Services\\') ||
+        item.fqcn.startsWith('App\\Actions\\') ||
+        item.fqcn.startsWith('App\\UseCases\\'),
+    )
+    .map((item) => item.alias);
+
+  const modelAliases = new Set(importedModels);
+
+  const usesService =
+    importedServices.length > 0 ||
+    /\b[A-Z][A-Za-z0-9_\\]*(?:Service|Action|UseCase)\b/.test(content) ||
+    /function\s+__construct\s*\([\s\S]*?\b[A-Z][A-Za-z0-9_\\]*(?:Service|Action|UseCase)\s+\$[A-Za-z_][A-Za-z0-9_]*[\s\S]*?\)/m.test(
+      content,
+    );
+  signals.usesService = usesService;
+  if (usesService) {
+    metrics.controllersUsingService = 1;
+  }
+
+  const usesFormRequest = /function\s+\w+\s*\([^)]*\b[A-Za-z0-9_\\]*Request\s+\$[A-Za-z0-9_]+[^)]*\)/m.test(
+    content,
+  );
+  signals.usesFormRequest = usesFormRequest;
+  if (usesFormRequest) {
+    metrics.controllersUsingFormRequest = 1;
+  }
+
+  const modelCalls = collectModelStaticCalls(content, modelAliases);
+  for (const call of modelCalls) {
+    const { className, method, line } = call;
+    signals.directModelCalls.push(call);
+    metrics.directModelCalls += 1;
+
+    if (method === 'all') {
+      metrics.modelAllCallsInController += 1;
+      signals.modelAllCalls.push(call);
+      violations.push(
+        createViolation({
+          type: 'model-all-in-controller',
+          severity: 'high',
+          file: relativePath,
+          line,
+          message: `Controller usando ${className}::all() diretamente`,
+          rationale: 'Carregar tudo sem paginação tende a degradar performance em escala.',
+          suggestion: 'Use paginação/filtros e delegue consulta para Service/UseCase.',
+        }),
+      );
+    }
+  }
+
+  if (signals.directModelCalls.length > 0) {
+    metrics.controllersWithDirectModel = 1;
+  }
+
+  for (const match of content.matchAll(/\$request->all\s*\(\s*\)/g)) {
+    const line = lineFromIndex(content, match.index);
+    signals.requestAllCalls.push({ line });
+    metrics.requestAllCalls += 1;
+    violations.push(
+      createViolation({
+        type: 'mass-assignment-risk',
+        severity: 'medium',
+        file: relativePath,
+        line,
+        message: 'Uso de $request->all() detectado',
+        rationale: 'Aceitar payload completo aumenta risco de mass assignment e inconsistência de validação.',
+        suggestion: 'Prefira `$request->validated()` com FormRequest ou DTO.',
+      }),
+    );
+  }
+
+  if (signals.fileLineCount > threshold(thresholds, 'fatControllerLines', 220)) {
+    metrics.fatControllers = 1;
+    violations.push(
+      createViolation({
+        type: 'fat-controller',
+        severity: 'low',
+        file: relativePath,
+        line: 1,
+        message: `Controller com ${signals.fileLineCount} linhas`,
+        rationale: 'Controllers extensos tendem a acumular responsabilidades.',
+        suggestion: 'Quebre fluxos por Services/Actions menores.',
+      }),
+    );
+  }
+
+  const functionBlocks = extractFunctionBlocks(content);
+  signals.methodCount = functionBlocks.length;
+  for (const block of functionBlocks) {
+    const methodLines = block.lines;
+    if (methodLines > threshold(thresholds, 'largeControllerMethodLines', 80)) {
+      metrics.largeControllerMethods += 1;
+      signals.largeMethodCount += 1;
+      violations.push(
+        createViolation({
+          type: 'large-controller-method',
+          severity: 'low',
+          file: relativePath,
+          line: block.line,
+          message: `Método de controller com ${methodLines} linhas`,
+          rationale: 'Métodos extensos escondem múltiplas responsabilidades.',
+          suggestion: 'Extrair blocos para Services/UseCases.',
+        }),
+      );
+    }
+  }
+
+  const fileBasename = path.basename(relativePath, '.php');
+  const hasMatchingTest = testBasenames.has(`${fileBasename}Test`) || testBasenames.has(fileBasename);
+  signals.hasTest = hasMatchingTest;
+  if (!hasMatchingTest) {
+    metrics.missingTests += 1;
+    violations.push(
+      createViolation({
+        type: 'missing-test',
+        severity: 'low',
+        file: relativePath,
+        line: 1,
+        message: `Nenhum teste detectado para ${fileBasename}`,
+        rationale: 'Cobertura baixa aumenta regressões em refactor.',
+        suggestion: `Adicionar ao menos um teste para ${fileBasename}.`,
+      }),
+    );
+  }
+
+  analyzeDynamicRawSql({ relativePath, content, metrics, signals, violations });
+  analyzeQueryDiscipline({
+    relativePath,
+    content,
+    metrics,
+    signals,
+    violations,
+    sourceKind: 'controller',
+  });
+}
+
+function analyzeService({ relativePath, content, metrics, signals, violations, testBasenames, thresholds }) {
+  metrics.services = 1;
+  signals.fileLineCount = content.split('\n').length;
+  signals.methodCount = extractFunctionBlocks(content).length;
+
+  const fileBasename = path.basename(relativePath, '.php');
+  const hasMatchingTest = testBasenames.has(`${fileBasename}Test`) || testBasenames.has(fileBasename);
+  signals.hasTest = hasMatchingTest;
+
+  if (!hasMatchingTest) {
+    metrics.missingTests += 1;
+    violations.push(
+      createViolation({
+        type: 'missing-test',
+        severity: 'low',
+        file: relativePath,
+        line: 1,
+        message: `Service ${fileBasename} sem teste dedicado`,
+        rationale: 'Serviços concentram regra de negócio e precisam validação de comportamento.',
+        suggestion: `Adicionar teste unitário para ${fileBasename}.`,
+      }),
+    );
+  }
+
+  if (signals.fileLineCount > threshold(thresholds, 'fatServiceLines', 260)) {
+    violations.push(
+      createViolation({
+        type: 'fat-service',
+        severity: 'medium',
+        file: relativePath,
+        line: 1,
+        message: `Service com ${signals.fileLineCount} linhas`,
+        rationale: 'Services muito grandes viram ponto único de acoplamento e regressão.',
+        suggestion: 'Separar em Actions/UseCases por responsabilidade.',
+      }),
+    );
+  }
+
+  const modelAliases = collectImportedModelAliases(content);
+  const modelCalls = collectModelStaticCalls(content, modelAliases);
+  modelCalls
+    .filter((item) => item.method === 'all')
+    .forEach((call) => {
+      metrics.modelAllCallsInService += 1;
+      signals.modelAllCalls.push(call);
+      violations.push(
+        createViolation({
+          type: 'model-all-in-service',
+          severity: 'medium',
+          file: relativePath,
+          line: call.line,
+          message: `Service usando ${call.className}::all()`,
+          rationale: 'Leitura sem paginação/filtro em service tende a custar caro em escala.',
+          suggestion: 'Use paginação, chunking ou query com limites explícitos.',
+        }),
+      );
+    });
+
+  analyzeDynamicRawSql({ relativePath, content, metrics, signals, violations });
+  analyzeQueryDiscipline({
+    relativePath,
+    content,
+    metrics,
+    signals,
+    violations,
+    sourceKind: 'service',
+  });
+  analyzeCriticalWriteTransaction({ relativePath, content, metrics, signals, violations });
+}
+
+function analyzeModel({ relativePath, content, metrics, signals, violations, testBasenames, thresholds }) {
+  metrics.models = 1;
+  signals.fileLineCount = content.split('\n').length;
+
+  const methodCount = extractFunctionBlocks(content).length;
+  signals.methodCount = methodCount;
+
+  if (
+    signals.fileLineCount > threshold(thresholds, 'fatModelLines', 320) ||
+    methodCount > threshold(thresholds, 'fatModelMethods', 15)
+  ) {
+    metrics.fatModels = 1;
+    violations.push(
+      createViolation({
+        type: 'fat-model',
+        severity: 'medium',
+        file: relativePath,
+        line: 1,
+        message: `Model com ${signals.fileLineCount} linhas e ${methodCount} métodos`,
+        rationale: 'Model pesado tende a concentrar regra demais e difícil reuso/teste.',
+        suggestion: 'Extrair regras para Services/UseCases/DTOs conforme contexto.',
+      }),
+    );
+  }
+
+  const fileBasename = path.basename(relativePath, '.php');
+  const hasMatchingTest = testBasenames.has(`${fileBasename}Test`) || testBasenames.has(fileBasename);
+  signals.hasTest = hasMatchingTest;
+  if (!hasMatchingTest) {
+    metrics.missingTests += 1;
+  }
+
+  analyzeDynamicRawSql({ relativePath, content, metrics, signals, violations });
+  analyzeQueryDiscipline({
+    relativePath,
+    content,
+    metrics,
+    signals,
+    violations,
+    sourceKind: 'command',
+  });
+  analyzeCriticalWriteTransaction({ relativePath, content, metrics, signals, violations });
+}
+
+function analyzePolicy({ content, metrics, signals }) {
+  metrics.policies = 1;
+  signals.fileLineCount = content.split('\n').length;
+  signals.methodCount = extractFunctionBlocks(content).length;
+}
+
+function analyzeCommand({ relativePath, content, metrics, signals, violations, thresholds }) {
+  metrics.commands = 1;
+  signals.fileLineCount = content.split('\n').length;
+  signals.methodCount = extractFunctionBlocks(content).length;
+
+  if (signals.fileLineCount > threshold(thresholds, 'fatCommandLines', 260)) {
+    metrics.fatCommands = 1;
+    violations.push(
+      createViolation({
+        type: 'fat-command',
+        severity: 'medium',
+        file: relativePath,
+        line: 1,
+        message: `Command com ${signals.fileLineCount} linhas`,
+        rationale: 'Commands longos tendem a concentrar fluxo operacional e dificultar manutenção.',
+        suggestion: 'Extrair passos para Services/Actions reutilizáveis.',
+      }),
+    );
+  }
+
+  const modelAliases = collectImportedModelAliases(content);
+  const modelCalls = collectModelStaticCalls(content, modelAliases);
+  modelCalls
+    .filter((item) => item.method === 'all')
+    .forEach((call) => {
+      metrics.modelAllCallsInCommand += 1;
+      signals.modelAllCalls.push(call);
+      violations.push(
+        createViolation({
+          type: 'model-all-in-command',
+          severity: 'medium',
+          file: relativePath,
+          line: call.line,
+          message: `Command usando ${call.className}::all()`,
+          rationale: 'Carga total de registros em command pode gerar memória alta e execução lenta.',
+          suggestion: 'Prefira chunking/lazy collections ou queries paginadas.',
+        }),
+      );
+    });
+
+  analyzeDynamicRawSql({ relativePath, content, metrics, signals, violations });
+}
+
+function analyzeFilamentResource({ relativePath, content, metrics, signals, violations, thresholds }) {
+  metrics.filamentResources = 1;
+  signals.fileLineCount = content.split('\n').length;
+  signals.methodCount = extractFunctionBlocks(content).length;
+
+  if (
+    signals.fileLineCount > threshold(thresholds, 'fatFilamentResourceLines', 320) ||
+    signals.methodCount > threshold(thresholds, 'fatFilamentResourceMethods', 12)
+  ) {
+    metrics.fatFilamentResources = 1;
+    violations.push(
+      createViolation({
+        type: 'fat-filament-resource',
+        severity: 'low',
+        file: relativePath,
+        line: 1,
+        message: `Filament Resource extenso (${signals.fileLineCount} linhas / ${signals.methodCount} métodos)`,
+        rationale: 'Resources muito extensos tendem a misturar UI config com regra de negócio.',
+        suggestion: 'Extrair regras para Services/Policies e simplificar configuração da Resource.',
+      }),
+    );
+  }
+
+  analyzeDynamicRawSql({ relativePath, content, metrics, signals, violations });
+}
+
+function analyzeFilamentPage({ relativePath, content, metrics, signals, violations, thresholds }) {
+  metrics.filamentPages = 1;
+  signals.fileLineCount = content.split('\n').length;
+  signals.methodCount = extractFunctionBlocks(content).length;
+  signals.hasFilamentPageAuth = hasFilamentPageAuthorizationSignal(content);
+
+  if (signals.hasFilamentPageAuth) {
+    metrics.filamentPagesWithAuth = 1;
+  } else {
+    violations.push(
+      createViolation({
+        type: 'filament-page-missing-authz',
+        severity: 'medium',
+        file: relativePath,
+        line: 1,
+        message: 'Filament Page sem sinal explícito de controle de acesso',
+        rationale: 'Pages podem ser acessadas por URL direta; sem guardas explícitas aumenta risco de exposição indevida.',
+        suggestion: 'Considere `canAccess()`/policy/authorize no fluxo da Page.',
+      }),
+    );
+  }
+
+  if (signals.fileLineCount > threshold(thresholds, 'fatFilamentResourceLines', 320)) {
+    metrics.fatFilamentPages = 1;
+    violations.push(
+      createViolation({
+        type: 'fat-filament-page',
+        severity: 'low',
+        file: relativePath,
+        line: 1,
+        message: `Filament Page extensa (${signals.fileLineCount} linhas)`,
+        rationale: 'Pages extensas tendem a acumular fluxo de UI e regra de negócio.',
+        suggestion: 'Extrair lógica para Services/Actions e reduzir responsabilidade da Page.',
+      }),
+    );
+  }
+
+  analyzeDynamicRawSql({ relativePath, content, metrics, signals, violations });
+}
+
+function analyzeFilamentWidget({ relativePath, content, metrics, signals, violations, thresholds }) {
+  metrics.filamentWidgets = 1;
+  signals.fileLineCount = content.split('\n').length;
+  signals.methodCount = extractFunctionBlocks(content).length;
+  signals.hasFilamentWidgetAuth = hasFilamentWidgetAuthorizationSignal(content);
+
+  if (signals.hasFilamentWidgetAuth) {
+    metrics.filamentWidgetsWithAuth = 1;
+  } else {
+    violations.push(
+      createViolation({
+        type: 'filament-widget-missing-authz',
+        severity: 'low',
+        file: relativePath,
+        line: 1,
+        message: 'Filament Widget sem sinal explícito de visibilidade/autorização',
+        rationale: 'Widgets podem expor dados sensíveis no painel sem checagem explícita de visibilidade.',
+        suggestion: 'Considere implementar `canView()` e/ou autorização server-side.',
+      }),
+    );
+  }
+
+  if (signals.fileLineCount > threshold(thresholds, 'fatFilamentResourceLines', 320)) {
+    metrics.fatFilamentWidgets = 1;
+    violations.push(
+      createViolation({
+        type: 'fat-filament-widget',
+        severity: 'low',
+        file: relativePath,
+        line: 1,
+        message: `Filament Widget extenso (${signals.fileLineCount} linhas)`,
+        rationale: 'Widgets extensos podem concentrar consulta/transformação além da responsabilidade de apresentação.',
+        suggestion: 'Mover preparação de dados para camada de serviço e simplificar o Widget.',
+      }),
+    );
+  }
+
+  analyzeDynamicRawSql({ relativePath, content, metrics, signals, violations });
+}
+
+function analyzeRouteFile({ relativePath, content, metrics, signals, violations }) {
+  metrics.routeFiles = 1;
+
+  const hasStateChangingRoute = /\bRoute::(?:post|put|patch|delete)\s*\(/.test(content);
+  const hasAuth = /\bauth(?::|['"])/i.test(content);
+  const hasThrottle = /\bthrottle(?::|['"])/i.test(content) || /\bRateLimiter::/i.test(content);
+  const hasWithoutCsrf = /\bwithoutMiddleware\s*\(\s*(?:[^)]*VerifyCsrfToken::class|['"]csrf['"])/i.test(content);
+
+  signals.hasStateChangingRoute = hasStateChangingRoute;
+  signals.hasRouteAuth = hasAuth;
+  signals.hasRouteThrottle = hasThrottle;
+  signals.hasRouteWithoutCsrf = hasWithoutCsrf;
+
+  if (hasAuth) {
+    metrics.routeFilesWithAuth = 1;
+  }
+
+  if (hasThrottle) {
+    metrics.routeFilesWithThrottle = 1;
+  }
+
+  if (hasStateChangingRoute && !hasAuth) {
+    metrics.stateChangingRouteFilesWithoutAuth = 1;
+    violations.push(
+      createViolation({
+        type: 'state-route-without-auth',
+        severity: 'high',
+        file: relativePath,
+        line: 1,
+        message: 'Arquivo de rotas state-changing sem evidência de middleware auth',
+        rationale: 'Endpoints de escrita sem autenticação explícita elevam risco de bypass/autorização indevida.',
+        suggestion: 'Aplique middleware auth/policy em rotas de escrita e confirme escopo tenant.',
+      }),
+    );
+  }
+
+  if (hasStateChangingRoute && !hasThrottle) {
+    metrics.stateChangingRouteFilesWithoutThrottle = 1;
+    violations.push(
+      createViolation({
+        type: 'state-route-without-throttle',
+        severity: 'medium',
+        file: relativePath,
+        line: 1,
+        message: 'Arquivo de rotas state-changing sem evidência de throttle/rate limiter',
+        rationale: 'Ausência de throttling em rotas de escrita aumenta risco de brute force/abuso.',
+        suggestion: 'Defina throttle por endpoint/ator para rotas críticas.',
+      }),
+    );
+  }
+
+  if (hasStateChangingRoute && hasWithoutCsrf) {
+    metrics.routeFilesWithoutCsrf = 1;
+    violations.push(
+      createViolation({
+        type: 'state-route-without-csrf',
+        severity: 'medium',
+        file: relativePath,
+        line: 1,
+        message: 'Rotas state-changing com bypass explícito de CSRF detectado',
+        rationale: 'Bypass de CSRF em rotas de escrita exige justificativa forte e escopo restrito.',
+        suggestion: 'Revisar necessidade de bypass e garantir compensações (auth, signed URL, nonce).',
+      }),
+    );
+  }
+}
+
+function analyzeLivewireComponent({ relativePath, content, metrics, signals, violations }) {
+  metrics.livewireComponents = 1;
+  signals.fileLineCount = content.split('\n').length;
+
+  const publicProps = Array.from(content.matchAll(/\bpublic\s+(?:\??[A-Za-z0-9_\\|]+\s+)?\$[A-Za-z0-9_]+/g)).length;
+  const lockedProps = Array.from(content.matchAll(/#\[\s*Locked(?:\s*\([^\)]*\))?\s*\]/g)).length;
+
+  metrics.livewirePublicProperties += publicProps;
+  metrics.livewireLockedProperties += lockedProps;
+  signals.livewirePublicPropertyCount = publicProps;
+  signals.livewireLockedPropertyCount = lockedProps;
+
+  if (publicProps > 0 && lockedProps === 0) {
+    violations.push(
+      createViolation({
+        type: 'livewire-unlocked-public-properties',
+        severity: 'medium',
+        file: relativePath,
+        line: 1,
+        message: 'Componente Livewire com propriedades públicas sem lock detectado',
+        rationale: 'Propriedades públicas são superfície de input e podem sofrer tampering se não controladas.',
+        suggestion: 'Avalie `#[Locked]`, validação defensiva e autorização em cada mutação/action.',
+      }),
+    );
+  }
+
+  analyzeDynamicRawSql({ relativePath, content, metrics, signals, violations });
+}
+
+function analyzePhpFile({ relativePath, absolutePath, content, testBasenames, thresholds = {} }) {
+  const metrics = createMetrics();
+  const signals = createSignals();
+  const violations = [];
+  const kind = detectKind(relativePath, content);
+
+  if (kind === 'controller') {
+    analyzeController({ relativePath, content, metrics, signals, violations, testBasenames, thresholds });
+  } else if (kind === 'service') {
+    analyzeService({ relativePath, content, metrics, signals, violations, testBasenames, thresholds });
+  } else if (kind === 'command') {
+    analyzeCommand({ relativePath, content, metrics, signals, violations, thresholds });
+  } else if (kind === 'filament-resource') {
+    analyzeFilamentResource({ relativePath, content, metrics, signals, violations, thresholds });
+  } else if (kind === 'filament-page') {
+    analyzeFilamentPage({ relativePath, content, metrics, signals, violations, thresholds });
+  } else if (kind === 'filament-widget') {
+    analyzeFilamentWidget({ relativePath, content, metrics, signals, violations, thresholds });
+  } else if (kind === 'route-file') {
+    analyzeRouteFile({ relativePath, content, metrics, signals, violations });
+  } else if (kind === 'livewire-component') {
+    analyzeLivewireComponent({ relativePath, content, metrics, signals, violations });
+  } else if (kind === 'model') {
+    analyzeModel({ relativePath, content, metrics, signals, violations, testBasenames, thresholds });
+  } else if (kind === 'policy') {
+    analyzePolicy({ content, metrics, signals });
+  }
+
+  analyzeCommonSecuritySignals({
+    content,
+    metrics,
+    signals,
+  });
+  analyzeDangerousSinks({
+    relativePath,
+    content,
+    metrics,
+    signals,
+    violations,
+  });
+
+  return {
+    file: relativePath,
+    absolutePath,
+    kind,
+    metrics,
+    signals,
+    violations,
+  };
+}
+
+function analyzeFiles({ files, root, testBasenames, thresholds = {} }) {
+  const perFile = {};
+
+  for (const absolutePath of files) {
+    if (!absolutePath.endsWith('.php') || !fs.existsSync(absolutePath)) {
+      continue;
+    }
+
+    const relativePath = normalizePath(path.relative(root, absolutePath));
+    const content = fs.readFileSync(absolutePath, 'utf8');
+
+    perFile[relativePath] = analyzePhpFile({
+      relativePath,
+      absolutePath,
+      content,
+      testBasenames,
+      thresholds,
+    });
+  }
+
+  return perFile;
+}
+
+module.exports = {
+  ANALYZER_VERSION,
+  analyzeFiles,
+};

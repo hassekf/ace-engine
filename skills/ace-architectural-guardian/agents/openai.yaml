@@ -1,0 +1,7 @@
+interface:
+  display_name: "ACE Guardian"
+  short_description: "Keep code aligned with ACE architectural coverage."
+  default_prompt: "Use $ace-architectural-guardian to run ACE MCP checks before/after coding, summarize AchCoverage drift, and record approved architectural decisions."
+
+policy:
+  allow_implicit_invocation: true
