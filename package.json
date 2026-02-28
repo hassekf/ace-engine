@@ -4,11 +4,12 @@
   "description": "Architectural Coverage Engine — zero-dependency incremental architectural analysis for Laravel projects. Measures consistency, infers patterns, evaluates security baselines, and exposes an MCP server for LLM integration.",
   "type": "commonjs",
   "bin": {
-    "ace": "./bin/ace.js"
+    "ace": "bin/ace.js"
   },
   "files": [
     "bin/",
     "src/",
+    "skills/",
     "LICENSE"
   ],
   "scripts": {
@@ -34,11 +35,11 @@
   "author": "Hasse Karlsson-Fredlund",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/hassekf/ace.git"
+    "url": "git+https://github.com/hassekf/ace-engine.git"
   },
-  "homepage": "https://github.com/hassekf/ace#readme",
+  "homepage": "https://github.com/hassekf/ace-engine#readme",
   "bugs": {
-    "url": "https://github.com/hassekf/ace/issues"
+    "url": "https://github.com/hassekf/ace-engine/issues"
   },
   "engines": {
     "node": ">=18"

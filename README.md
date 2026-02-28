@@ -1,160 +1,562 @@
-# ACE · Architectural Coverage Engine
+# ACE — Architectural Coverage Engine
 
-ACE é um engine incremental para **coverage arquitetural** que roda localmente e em paralelo ao seu fluxo com LLM.
+**Incremental architectural analysis for Laravel projects. Zero dependencies.**
 
-## Objetivo do MVP
+ACE scans your Laravel codebase, measures architectural consistency across four dimensions, infers dominant patterns, evaluates a stack-aware security baseline, and exposes everything through a CLI and an MCP server for LLM integration.
 
-- Escanear projeto Laravel incrementalmente.
-- Medir consistência arquitetural (AchCoverage).
-- Inferir padrões arquiteturais dominantes por contexto e por registry dinâmico.
-- Detectar inconsistências e hotspots.
-- Avaliar baseline de segurança Laravel/Livewire/Filament por padrão (sem configuração manual).
-- Detectar riscos de performance/integridade (N+1, `->get()` sem limite e writes críticos sem transação).
-- Suportar configuração por projeto (`.ace/config.json`) com waivers e thresholds.
-- Manter cache incremental por hash para reduzir reanálise.
-- Gerar painel HTML local.
-- Expor MCP local para LLM consultar estado/coverage, sugerir decisões, formalizar regras e evoluir patterns.
-- Detectar módulos por stack com docs oficiais e escopos sugeridos para LLM (Filament/Livewire/Sanctum/Spatie/Horizon).
-
-## Instalação local (dev)
-
-```bash
-cd /Users/hassekf/www/ace
-node ./bin/ace.js help
-npm test
+```
+AchCoverage: 74% (+3) | Security: 82% | Pattern: service-layer | Confidence: 100%
 ```
 
-## Comandos
+## Why ACE?
+
+As Laravel projects grow, architectural decisions drift. Controllers that started with services start calling models directly. Validation moves from FormRequests to inline. New team members follow the most recent file they find, not the agreed pattern.
+
+ACE makes this drift visible and measurable — without requiring any configuration, AST parsers, or external dependencies.
+
+- **Measures what matters**: layering, validation, testability, and consistency — weighted and composable
+- **Infers patterns**: detects your dominant patterns automatically instead of forcing conventions
+- **Tracks decisions**: formalize architectural decisions and rules that your team agreed on
+- **Stack-aware security**: evaluates Laravel, Filament, Livewire, Sanctum, Spatie Permission, and Horizon controls
+- **LLM-native**: MCP server lets Claude, Cursor, Copilot, or any MCP-compatible LLM query your architecture in real-time
+- **Incremental**: SHA1 cache means re-scans only analyze changed files
+- **Zero dependencies**: pure Node.js stdlib, runs everywhere Node 18+ runs
+
+## Quick Start
 
 ```bash
-ace scan --scope=all
-ace scan --scope=changed
-ace watch --interval=2200
-ace status
-ace report
-ace mcp
-ace mcp --profile=full
+# Install globally
+npm install -g ace-engine
+
+# Or run directly with npx
+npx ace-engine scan --scope=all
+
+# Initialize ACE in your Laravel project
+cd /path/to/laravel-project
 ace init
-ace init --llms=codex,claude
-ace init --select-llms
-ace config:init --force
-ace config:show
-ace rule:add --title="Controller via Service" --constraints="No direct model call,Use Service"
-ace rule:update --id="controller-via-service-v1" --status=deprecated --note="Substituído por UseCase"
-ace decision:add --key="controller.data_access" --preferred="service-layer" --rationale="Padrao do projeto"
-ace decision:update --id="controller-data-access-service-layer-v1" --status=approved
+ace scan --scope=all
+ace status
+```
+
+## Installation
+
+### Global (recommended)
+
+```bash
+npm install -g ace-engine
+```
+
+### Per-project (devDependency)
+
+```bash
+npm install --save-dev ace-engine
+```
+
+### From source
+
+```bash
+git clone https://github.com/hassekf/ace-engine.git
+cd ace
+node ./bin/ace.js help
+```
+
+## AchCoverage: The Four Dimensions
+
+ACE computes an **AchCoverage** score (0–100%) from four weighted dimensions:
+
+| Dimension | Weight | What it measures |
+|---|---|---|
+| **Layering** | 35% | Are controllers delegating to services consistently? Or using direct model calls consistently? ACE adapts to _your_ chosen pattern. |
+| **Validation** | 20% | FormRequest adoption vs inline validation. Penalizes `$request->all()` usage. |
+| **Testability** | 20% | Ratio of controllers/services/models that have corresponding test files. |
+| **Consistency** | 25% | Violation density weighted by severity. Fewer violations = higher consistency. |
+
+Weights are configurable in `.ace/config.json`:
+
+```json
+{
+  "coverageWeights": {
+    "layering": 0.35,
+    "validation": 0.20,
+    "testability": 0.20,
+    "consistency": 0.25
+  }
+}
+```
+
+## Commands
+
+### Core
+
+```bash
+ace scan --scope=all              # Full scan
+ace scan --scope=changed          # Incremental (only changed files)
+ace scan --files=app/Http/Controllers/UserController.php
+ace status                        # Current state summary
+ace status --json                 # Machine-readable output
+ace report                        # Generate HTML dashboard
+ace watch --interval=2200         # Watch for changes and re-scan
+```
+
+### Initialization & Config
+
+```bash
+ace init                          # Scaffold .ace/ layout, gitignore, LLM onboarding (all targets)
+ace init --llms=claude,codex      # Only generate artifacts for specific LLMs
+ace init --select-llms            # Interactive LLM selection in terminal
+ace init --force                  # Overwrite existing files
+ace config:init                   # Create .ace/config.json with defaults
+ace config:show                   # Print current config
+```
+
+Supported `--llms` targets: `claude`, `cursor`, `copilot`, `codex` (or `all`).
+
+When targeting **Claude** or **Codex**, `ace init` also creates a local skill:
+- `.claude/skills/ace-architectural-guardian/SKILL.md`
+- `.codex/skills/ace-architectural-guardian/SKILL.md`
+
+These skills instruct the LLM to consult ACE before and after structural changes.
+
+### Architectural Rules
+
+Rules are formalized team agreements about how code should be structured:
+
+```bash
+ace rule:add --title="Controller via Service" \
+  --constraints="No direct model call,Use Service" \
+  --applies_to="controller"
+
+ace rule:update --id="controller-via-service-v1" --status=deprecated \
+  --note="Replaced by UseCase pattern"
+```
+
+### Architectural Decisions
+
+Decisions record what pattern is preferred for a given concern:
+
+```bash
+ace decision:add --key="controller.data_access" \
+  --preferred="service-layer" \
+  --rationale="Team consensus from sprint 12"
+
+ace decision:update --id="controller-data-access-service-layer-v1" \
+  --status=approved
+
 ace decision:list --json
-ace waiver:add --type="pattern-drift:*" --file="app/Legacy/*" --reason="Refactor em andamento" --until=2026-12-31
+```
+
+### Waivers
+
+Suppress specific violations for legacy code or ongoing refactors:
+
+```bash
+ace waiver:add --type="pattern-drift:*" \
+  --file="app/Legacy/*" \
+  --reason="Refactor in progress" \
+  --until=2026-12-31
+
 ace waiver:list --json
-ace learning:bundle --json
-ace modules:list --json
+ace waiver:update --id="waiver-id" --status=inactive
+```
+
+Waivers support wildcards for `type`, `file`, `severity`, and `contains`.
+
+### Pattern Registry
+
+ACE infers patterns automatically, but you can also define custom ones:
+
+```bash
 ace pattern:list --json
-ace pattern:upsert --json='{"key":"custom.pattern","detector":{"type":"single_ratio","totalMetric":"controllers","targetMetric":"controllersUsingService","orientation":"high_is_good"}}'
+
+ace pattern:upsert --json='{
+  "key": "controller.data_access",
+  "detector": {
+    "type": "split_ratio",
+    "totalMetric": "controllers",
+    "sideAMetric": "controllersUsingService",
+    "sideBMetric": "controllersWithDirectModel",
+    "labels": { "sideA": "service-layer", "sideB": "direct-model" },
+    "orientation": "high_is_good"
+  }
+}'
+
+ace pattern:disable --key="controller.validation"
+ace pattern:enable --key="controller.validation"
 ace pattern:remove --key="custom.pattern"
-ace bootstrap:laravel --dry-run --json
-ace status --root=/Users/voce/www/projeto-laravel
 ```
 
-Todos os comandos aceitam `--root=/caminho/do/projeto` para operar fora da pasta atual.
+### Bootstrap
 
-## Testes
+Accelerate setup for existing Laravel projects:
 
 ```bash
-npm test
+ace bootstrap:laravel --dry-run --json   # Preview proposals
+ace bootstrap:laravel                     # Apply proposals
 ```
 
-Também há workflow de CI em `.github/workflows/ci.yml`.
+Bootstrap will:
+1. Run an initial full scan
+2. Ensure useful Laravel patterns in the registry
+3. Propose architectural decisions based on inference + confidence + adoption
+4. Optionally apply proposals (skip with `--dry-run`)
 
-## Estado e relatório
+### Modules
 
-O ACE grava artefatos em `.ace/`:
-
-Arquivos versionáveis (recomendado em git):
-
-- `.ace/config.json`: config do projeto (thresholds, pesos, ignore paths, waivers).
-- `.ace/pattern-registry.json`: registry dinâmico de patterns avaliados pelo engine.
-- `.ace/rules.json`: regras arquiteturais formalizadas.
-- `.ace/decisions.json`: decisões arquiteturais versionadas.
-
-Arquivos locais/efêmeros (normalmente ignorados):
-
-- `.ace/ace.json`: estado vivo (coverage, segurança, violações, índice de arquivos, histórico recente).
-- `.ace/report.html`: painel HTML.
-- `.ace/history/*.json`: snapshots por execução.
-- `.ace/integration/*`: snippets de integração MCP/skill gerados por `ace init`.
-
-Onboarding por LLM via `ace init`:
-
-- `--llms=all|codex,claude,cursor,copilot` para escolher alvos explicitamente.
-- `--select-llms` para seleção interativa no terminal.
-- Para Codex e Claude, o init cria skill local:
-  - `.codex/skills/ace-architectural-guardian/SKILL.md`
-  - `.claude/skills/ace-architectural-guardian/SKILL.md`
-
-O comando `ace init` agora cria/atualiza um bloco gerenciado no `.gitignore` do projeto para manter essa separação automaticamente.
-
-## MCP (stdio)
-
-Por padrão o ACE sobe o MCP em perfil `compact` (15 tools), para evitar hard-cap de tools em clientes MCP.
-Para expor todas as tools legadas, use `ace mcp --profile=full` (ou `ACE_MCP_PROFILE=full`).
-
-Tools do perfil `compact`:
-
-- `ace.get_status`
-- `ace.get_coverage`
-- `ace.get_project_model`
-- `ace.get_security`
-- `ace.report_inconsistencies`
-- `ace.scan_scope`
-- `ace.get_learning_bundle`
-- `ace.get_modules`
-- `ace.manage_rules`
-- `ace.manage_decisions`
-- `ace.manage_waivers`
-- `ace.manage_patterns`
-- `ace.manage_config`
-- `ace.init_project`
-- `ace.bootstrap_laravel`
-
-Use `ace mcp` para subir o servidor e conectar no cliente LLM que suporte MCP.
-Para expor outro projeto via MCP, use `ace mcp --root=/caminho/do/projeto`.
-
-## Bootstrap Laravel
-
-Use o bootstrap para acelerar setup em projetos Laravel já existentes:
+Detect your Laravel stack and get scoped recommendations:
 
 ```bash
-ace bootstrap:laravel --dry-run --json
-ace bootstrap:laravel
+ace modules:list --json
+ace modules:list --enabled-only
 ```
 
-Comportamento:
+Detected modules: Laravel Core, Filament, Livewire, Sanctum, Spatie Permission, Horizon.
 
-1. Executa scan inicial.
-2. Garante patterns Laravel úteis no registry (quando ausentes).
-3. Propõe decisões arquiteturais com base em inferência + confiança + adoção.
-4. Opcionalmente aplica decisões propostas (padrão: aplica; use `--dry-run` para prévia).
+### Learning Bundle
 
-## Skill pronta
+Export a comprehensive context bundle for LLM consumption:
 
-A skill `ace-architectural-guardian` foi criada em:
+```bash
+ace learning:bundle --json
+```
 
-- `/Users/hassekf/www/ace/skills/ace-architectural-guardian/SKILL.md`
-- `/Users/hassekf/www/ace/skills/ace-architectural-guardian/agents/openai.yaml`
+Includes: coverage, security highlights, pattern registry, decisions, rules, hotspots, representative files, and guidance prompts.
 
-Ela descreve o fluxo reativo + proativo:
+## MCP Server
 
-1. Consultar ACE antes da geração.
-2. Revalidar coverage após a mudança.
-3. Sugerir opções de melhoria sem bloquear entrega.
-4. Formalizar regra apenas com consenso explícito do usuário.
+ACE includes a stdio-based [MCP](https://modelcontextprotocol.io/) server compatible with Claude Code, Cursor, GitHub Copilot, and any MCP-compatible client.
 
-## Observações
+### Starting the server
 
-- Este MVP é heurístico e orientado a Laravel (regex + estrutura de pastas + inferência incremental).
-- O analyzer agora usa parsing de blocos de função com matching de chaves para reduzir erro de contagem por regex simples.
-- O analyzer inclui checks de performance e integridade transacional para projetos Laravel grandes.
-- O baseline de segurança é stack-aware e modular: checks opcionais só entram quando a stack é detectada.
-- Os defaults iniciais existem, mas vivem no `pattern-registry.json` e podem ser alterados sem patch no core.
-- O analyzer evita “opinião fixa” quando não há confiança suficiente e mantém padrões como `unknown` até ter evidência.
-- Próxima etapa natural: AST parser robusto dedicado (`nikic/php-parser` ou parser equivalente em Node) e score por domínio/regra.
+```bash
+ace mcp                         # Compact profile (15 tools)
+ace mcp --profile=full          # Full profile (30 tools, includes legacy)
+ace mcp --root=/path/to/project # Analyze a different project
+```
+
+### Client configuration
+
+After running `ace init`, MCP configuration snippets are generated in `.ace/integration/`.
+
+**Claude Code** (`.claude/settings.json` or project-level):
+```json
+{
+  "mcpServers": {
+    "ace": {
+      "command": "npx",
+      "args": ["ace-engine", "mcp", "--root=/path/to/project"]
+    }
+  }
+}
+```
+
+**Cursor** (`.cursor/mcp.json`):
+```json
+{
+  "mcpServers": {
+    "ace": {
+      "command": "npx",
+      "args": ["ace-engine", "mcp", "--root=/path/to/project"]
+    }
+  }
+}
+```
+
+### Compact profile tools (15)
+
+| Tool | Description |
+|---|---|
+| `ace.get_status` | Full project status |
+| `ace.get_coverage` | AchCoverage with dimensions |
+| `ace.get_project_model` | Pattern model and metrics |
+| `ace.get_security` | Security baseline evaluation |
+| `ace.report_inconsistencies` | Violations filtered by severity/type/file |
+| `ace.scan_scope` | Trigger scan (all, changed, or specific files) |
+| `ace.get_learning_bundle` | Context bundle for LLM reasoning |
+| `ace.get_modules` | Detected stack modules with docs |
+| `ace.manage_rules` | CRUD for architectural rules |
+| `ace.manage_decisions` | CRUD for architectural decisions |
+| `ace.manage_waivers` | CRUD for violation waivers |
+| `ace.manage_patterns` | CRUD for pattern registry |
+| `ace.manage_config` | Read/write project config |
+| `ace.init_project` | Scaffold ACE layout |
+| `ace.bootstrap_laravel` | Auto-setup for Laravel projects |
+
+The `full` profile adds 15 legacy tools for backward compatibility with older configurations.
+
+## LLM Integration in Practice
+
+When ACE is connected to an LLM via MCP (or through the `ace-architectural-guardian` skill), it acts as a **live architectural advisor** during code generation and refactoring. The LLM doesn't just generate code — it checks your project's architecture before and after every structural change.
+
+### How the skill works
+
+The `ace-architectural-guardian` skill (auto-created by `ace init` for Claude and Codex) instructs the LLM to follow this flow:
+
+1. **Before generating code** — consult `ace.get_status` and `ace.get_project_model` to understand the current architecture
+2. **Generate or refactor** — write code aligned with the detected dominant pattern
+3. **After the change** — call `ace.scan_scope` on the modified files and report the delta
+4. **Surface issues** — if inconsistencies appear, present options (no refactor / simple refactor / full refactor) with effort estimates
+5. **Formalize only with consent** — never auto-create rules or decisions; wait for explicit user approval
+
+The LLM always ends with a status line:
+
+```
+AchCoverage: 74% (+2) | 2 new inconsistencies, 1 resolved
+Security: 82% | Report: .ace/report.html
+```
+
+### Example scenario
+
+You ask the LLM: *"Create a new OrderController with CRUD for orders"*
+
+Here's what happens behind the scenes:
+
+```
+┌─ LLM reads ACE state ─────────────────────────────────────────────┐
+│                                                                    │
+│  1. ace.get_status                                                 │
+│     → AchCoverage: 72%, Pattern: service-layer, Confidence: 100%   │
+│                                                                    │
+│  2. ace.get_project_model                                          │
+│     → 14/16 controllers use Service injection                      │
+│     → Dominant: service-layer (87% adoption)                       │
+│     → Active decision: controller.data_access → service-layer      │
+│                                                                    │
+│  LLM understands: this project uses the service layer pattern.     │
+│  It should NOT create a controller with direct Model calls.        │
+│                                                                    │
+├─ LLM generates code ──────────────────────────────────────────────┤
+│                                                                    │
+│  Creates:                                                          │
+│  • app/Http/Controllers/OrderController.php (injects OrderService) │
+│  • app/Services/OrderService.php                                   │
+│  • app/Http/Requests/StoreOrderRequest.php                         │
+│  • app/Http/Requests/UpdateOrderRequest.php                        │
+│                                                                    │
+├─ LLM re-scans ────────────────────────────────────────────────────┤
+│                                                                    │
+│  3. ace.scan_scope (files: OrderController.php, OrderService.php)  │
+│     → AchCoverage: 74% (+2)                                       │
+│     → 0 new inconsistencies                                        │
+│     → Pattern adoption: 15/17 controllers (88%)                    │
+│                                                                    │
+│  4. ace.report_inconsistencies                                     │
+│     → No new violations. Coverage improved.                        │
+│                                                                    │
+└────────────────────────────────────────────────────────────────────┘
+```
+
+The LLM responds with the generated code **plus** the ACE summary:
+
+> Created `OrderController` with `OrderService` injection, following the project's service-layer pattern (88% adoption).
+>
+> `AchCoverage: 74% (+2) | 0 new inconsistencies | Security: 82%`
+
+### When drift is detected
+
+If the LLM had generated a controller with direct `Order::all()` calls instead, the re-scan would flag it:
+
+```
+ace.scan_scope → AchCoverage: 70% (-2)
+ace.report_inconsistencies → pattern-drift:controller.data_access in OrderController.php
+```
+
+The LLM then presents options:
+
+> **Inconsistency detected**: `OrderController` uses direct model calls, but this project follows the service-layer pattern (87% adoption).
+>
+> 1. **Keep as-is** — accept temporary debt, add waiver
+> 2. **Simple refactor** — extract queries to `OrderService`, keep controller thin (~10 min)
+> 3. **Full refactor** — add repository layer + service + FormRequests (~30 min)
+>
+> Which approach do you prefer?
+
+### Formalizing decisions
+
+When you and the LLM agree on a pattern, the LLM can formalize it:
+
+```
+You: "Let's make service-layer the official pattern"
+
+LLM calls: ace.manage_decisions({
+  action: "create",
+  key: "controller.data_access",
+  preferred: "service-layer",
+  rationale: "Team consensus — 88% adoption, reduces controller complexity"
+})
+
+→ Decision created: controller-data-access-service-layer-v1
+  Future scans will flag controllers that don't follow this pattern.
+```
+
+### Without MCP (CLI only)
+
+Even without LLM integration, ACE works as a standalone CLI tool. Run `ace scan --scope=all` in CI or locally to get the same coverage, security, and consistency metrics.
+
+## Security Baseline
+
+ACE evaluates a security baseline tailored to your detected stack. Controls are only included when the relevant technology is detected.
+
+### Always evaluated (Laravel Core)
+- CSRF protection on state-changing routes
+- Authentication on state-changing routes
+- Rate limiting (throttle middleware)
+- Upload validation
+- Webhook signature verification
+- Raw SQL injection risk (distinguishes safe vs unsafe usage)
+- Policy/authorization coverage
+- Route-level auth coverage
+
+### Stack-specific controls
+- **Filament**: `canAccessPanel()`, page authorization, widget authorization
+- **Livewire**: `#[Locked]` property usage on public properties
+- **Sanctum**: API guard configuration
+- **Spatie Permission**: permission/role enforcement
+- **Horizon**: dashboard protection
+
+Each control reports `pass`, `warning`, `fail`, or `unknown` with a weighted score.
+
+## File Classification
+
+ACE classifies PHP files into kinds for targeted analysis:
+
+| Kind | Detection |
+|---|---|
+| `controller` | `app/Http/Controllers/` |
+| `service` | `app/Services/`, `app/Actions/`, `app/UseCases/` |
+| `model` | `app/Models/` |
+| `policy` | `app/Policies/` |
+| `command` | `app/Console/Commands/` |
+| `request` | `app/Http/Requests/` |
+| `filament-resource` | `app/Filament/*/Resources/` |
+| `filament-page` | `app/Filament/*/Pages/` |
+| `filament-widget` | `app/Filament/*/Widgets/` |
+| `livewire-component` | `app/Livewire/` or `app/Http/Livewire/` |
+| `route-file` | `routes/*.php` |
+
+## Analysis Capabilities
+
+ACE uses heuristic-based analysis (regex + brace/parenthesis matching) to detect:
+
+- Service layer adoption (constructor injection of Service/Action/UseCase)
+- FormRequest vs inline validation
+- Direct model calls in controllers
+- Fat controllers and long methods
+- `$request->all()` usage
+- Raw SQL with safe/unsafe distinction
+- `->get()` without constraints (unbounded queries)
+- N+1 query risks (lazy loading in loops)
+- Critical financial writes without `DB::transaction()`
+- Authorization signals in Filament Pages/Widgets
+- Livewire locked properties
+- Test file existence per controller/service/model
+
+## Project Layout
+
+ACE stores all artifacts in `.ace/`. Running `ace init` configures `.gitignore` automatically.
+
+**Versionable** (keep in git — shared with the team):
+- `.ace/config.json` — project configuration (thresholds, weights, ignore paths, waivers)
+- `.ace/pattern-registry.json` — dynamic pattern registry
+- `.ace/rules.json` — formalized architectural rules
+- `.ace/decisions.json` — versioned architectural decisions
+
+**Local/ephemeral** (auto-gitignored):
+- `.ace/ace.json` — live state (coverage, security, violations, file index)
+- `.ace/report.html` — HTML dashboard
+- `.ace/history/*.json` — per-scan snapshots
+- `.ace/integration/*` — MCP configuration snippets
+
+**LLM skills** (created by `ace init` outside `.ace/`):
+- `.claude/skills/ace-architectural-guardian/SKILL.md` — Claude Code skill
+- `.codex/skills/ace-architectural-guardian/SKILL.md` — Codex skill
+
+## Configuration Reference
+
+`.ace/config.json` supports:
+
+```json
+{
+  "ignorePaths": ["app/Legacy", "app/Generated"],
+  "coverageWeights": {
+    "layering": 0.35,
+    "validation": 0.20,
+    "testability": 0.20,
+    "consistency": 0.25
+  },
+  "thresholds": {
+    "fatControllerLines": 250,
+    "largeMethodLines": 40,
+    "fatServiceLines": 300,
+    "fatModelLines": 400,
+    "fatCommandLines": 300,
+    "fatFilamentResourceLines": 400,
+    "fatFilamentPageLines": 300,
+    "fatFilamentWidgetLines": 250
+  },
+  "waivers": []
+}
+```
+
+## All Flags
+
+Every command accepts `--root=/path/to/project` to operate on a different directory. Many commands accept `--json` for machine-readable output.
+
+```
+ace help
+ace scan [--scope=changed|all|path1,path2] [--files=a.php,b.php] [--json]
+ace watch [--interval=2200]
+ace status [--json]
+ace report
+ace mcp [--profile=compact|full]
+ace init [--force] [--json] [--llms=all|claude,cursor,copilot,codex] [--select-llms]
+ace config:init [--force] [--json]
+ace config:show [--json]
+ace rule:add --title="..." [--description="..."] [--applies_to=a,b] [--constraints=x,y]
+ace rule:update --id="..." --status=active|deprecated|inactive|rejected [--note="..."]
+ace decision:add --key="..." --preferred="..." [--rationale="..."]
+ace decision:update --id="..." --status=active|approved|superseded|deprecated|rejected [--note="..."]
+ace decision:list [--key=...] [--json]
+ace waiver:add [--type=...] [--file=...] [--severity=...] [--contains=...] --reason="..." [--until=YYYY-MM-DD]
+ace waiver:update --id="..." --status=active|inactive|expired [--reason="..."] [--until=YYYY-MM-DD]
+ace waiver:list [--status=active|inactive|expired] [--json]
+ace learning:bundle [--json]
+ace pattern:list [--json]
+ace pattern:upsert --json='...'
+ace pattern:disable --key="..."
+ace pattern:enable --key="..."
+ace pattern:remove --key="..."
+ace modules:list [--enabled-only] [--json]
+ace bootstrap:laravel [--dry-run] [--scope=all|changed] [--min_confidence=55] [--min_adoption=55]
+```
+
+## How it Works
+
+1. **Discovery** — finds all `.php` files, respecting ignore paths
+2. **Cache check** — compares SHA1 hash + analyzer version; unchanged files skip analysis
+3. **Analysis** — extracts ~60 metrics per file using heuristic-based PHP analysis
+4. **Pattern inference** — detects dominant patterns using configurable detectors (`split_ratio`, `single_ratio`)
+5. **Waiver application** — matches and applies active waivers, auto-expires when due
+6. **Coverage** — computes 4 dimensions + weighted overall score
+7. **Security** — evaluates stack-aware baseline controls
+8. **Suggestions** — generates actionable improvement suggestions
+9. **State persistence** — saves to `.ace/` with governance files as dedicated sidecars
+
+## Requirements
+
+- **Node.js 18+**
+- **No external dependencies** — uses only Node.js built-in modules
+- Target projects should follow Laravel conventions (`app/Http/Controllers/`, `app/Models/`, etc.)
+
+## Contributing
+
+```bash
+git clone https://github.com/hassekf/ace-engine.git
+cd ace
+npm test   # 29 tests, ~50ms, no setup needed
+```
+
+Tests cover: analyzer heuristics, coverage computation, pattern inference, security baseline, state governance, scaffold initialization, module detection, MCP tool profiles, config management, decisions, and engine cache.
+
+## License
+
+[MIT](LICENSE)
