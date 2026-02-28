@@ -31,6 +31,7 @@ test('writeReport supports en-US override', () => {
   assert.match(html, /Updated:/);
   assert.match(html, /Core Scorecards/);
   assert.match(html, /Recent Inconsistencies/);
+  assert.match(html, /Actionability/);
   assert.match(html, /id="ace-lang-select"/);
   assert.match(html, /Trend Correlations/);
   assert.doesNotMatch(html, /criticallll/i);
@@ -57,6 +58,46 @@ test('writeReport uses configured report language when locale is omitted', () =>
   assert.match(html, /<html lang="en-US">/);
   assert.match(html, /Suggestions:/);
   assert.match(html, /Recent Inconsistencies/);
+  assert.match(html, /Actionability/);
   assert.match(html, /Trend Correlations/);
   assert.doesNotMatch(html, /criticallll/i);
+});
+
+test('writeReport renders actionability controls when violations exist', () => {
+  const root = makeTmpRoot();
+  const state = loadState(root);
+  state.violations = [
+    {
+      id: 'v1',
+      severity: 'high',
+      type: 'mass-assignment-risk',
+      file: 'app/Http/Controllers/UserController.php',
+      line: 42,
+      message: 'Unsafe mass assignment detected',
+      suggestion: 'Use validated payload',
+      actionabilityScore: 88,
+      actionabilityPriority: 'P1',
+      actionabilityIndex: 5,
+      actionabilityRank: 1,
+    },
+  ];
+  state.actionability = {
+    summary: {
+      total: 1,
+      averageScore: 88,
+      highPriority: 1,
+      withTestSignal: 0,
+      withoutTestSignal: 1,
+      distribution: { P1: 1, P2: 0, P3: 0, P4: 0, P5: 0 },
+      topScore: 88,
+    },
+    top: state.violations,
+  };
+
+  const reportPath = writeReport(root, state, { locale: 'en-US' });
+  const html = fs.readFileSync(reportPath, 'utf8');
+
+  assert.match(html, /id="violation-priority"/);
+  assert.match(html, /Actionability/);
+  assert.match(html, /P1 · 88/);
 });

@@ -249,6 +249,15 @@ function statusPayload(root) {
       modeSummary: state.security?.modeSummary || {},
       domainSummary: state.security?.domainSummary || {},
     },
+    actionability: state.actionability?.summary || {
+      total: Number(state.violations.length || 0),
+      averageScore: 0,
+      highPriority: 0,
+      withTestSignal: 0,
+      withoutTestSignal: Number(state.violations.length || 0),
+      distribution: { P1: 0, P2: 0, P3: 0, P4: 0, P5: 0 },
+      topScore: 0,
+    },
     violations: state.violations.length,
     waivedViolations: (state.waivedViolations || []).length,
     suggestions: state.suggestions.length,
@@ -335,6 +344,9 @@ async function runCli(argv) {
     );
     console.log(
       `Security split: code ${Number(payload.security.domainSummary?.code?.score || 0)}% | pipeline ${Number(payload.security.domainSummary?.pipeline?.score || 0)}%`,
+    );
+    console.log(
+      `Actionability: avg ${Number(payload.actionability?.averageScore || 0)} | high priority ${Number(payload.actionability?.highPriority || 0)} | top ${Number(payload.actionability?.topScore || 0)}`,
     );
     console.log(`Inconsistências: ${payload.violations}`);
     console.log(`Waived: ${payload.waivedViolations}`);

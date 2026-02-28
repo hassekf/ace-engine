@@ -220,6 +220,8 @@ function buildToolsManifest(profile = 'compact') {
         type: 'object',
         properties: {
           limit: { type: 'number' },
+          priority: { type: 'string' },
+          sort_by: { type: 'string' },
         },
       },
     },
@@ -468,6 +470,18 @@ function startMcpServer({ root, profile = null }) {
           rules: state.rules.length,
         },
         security: state.security || {},
+        actionability: state.actionability || {
+          summary: {
+            total: Number(state.violations?.length || 0),
+            averageScore: 0,
+            highPriority: 0,
+            withTestSignal: 0,
+            withoutTestSignal: Number(state.violations?.length || 0),
+            distribution: { P1: 0, P2: 0, P3: 0, P4: 0, P5: 0 },
+            topScore: 0,
+          },
+          top: [],
+        },
         modules: state.security?.metadata?.modules || [],
       };
     }
@@ -502,9 +516,28 @@ function startMcpServer({ root, profile = null }) {
     if (name === 'ace.report_inconsistencies') {
       const state = loadState(root);
       const limit = Number(args.limit || 50);
+      const priority = String(args.priority || '').toUpperCase();
+      const sortBy = String(args.sort_by || 'actionability').toLowerCase();
+      const items = (state.violations || []).filter((item) => {
+        if (!priority) {
+          return true;
+        }
+        return String(item.actionabilityPriority || '').toUpperCase() === priority;
+      });
+      const sorted = sortBy === 'severity'
+        ? [...items].sort((a, b) => {
+            const rank = { critical: 5, high: 4, medium: 3, low: 2 };
+            const diff = (rank[String(b.severity || 'low').toLowerCase()] || 0) - (rank[String(a.severity || 'low').toLowerCase()] || 0);
+            if (diff !== 0) return diff;
+            return Number(b.actionabilityScore || 0) - Number(a.actionabilityScore || 0);
+          })
+        : [...items].sort(
+            (a, b) => Number(b.actionabilityScore || 0) - Number(a.actionabilityScore || 0),
+          );
       return {
         total: state.violations.length,
-        items: state.violations.slice(0, limit),
+        filtered: sorted.length,
+        items: sorted.slice(0, limit),
       };
     }
 

@@ -4,6 +4,21 @@ All notable changes to ACE are documented in this file.
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-02-28
+
+### Added
+- Actionability Index for inconsistencies:
+  - per-violation score and priority (`P1..P5`)
+  - ranking metadata (`actionabilityRank`) and scoring drivers
+  - persisted summary in state (`averageScore`, `highPriority`, distribution)
+- Report upgrades for Actionability:
+  - actionability summary bar in the inconsistencies panel
+  - priority filter (`P1..P5`) and actionability column in the table
+- MCP/CLI visibility for Actionability:
+  - `ace.get_status` now includes actionability summary
+  - `ace.report_inconsistencies` supports `priority` and `sort_by` (`actionability`/`severity`)
+  - `ace status` prints actionability snapshot (average/high-priority/top score)
+
 ## [0.3.0] - 2026-02-28
 
 ### Changed

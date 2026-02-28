@@ -162,6 +162,24 @@ function createInitialState(root) {
     },
     violations: [],
     waivedViolations: [],
+    actionability: {
+      summary: {
+        total: 0,
+        averageScore: 0,
+        highPriority: 0,
+        withTestSignal: 0,
+        withoutTestSignal: 0,
+        distribution: {
+          P1: 0,
+          P2: 0,
+          P3: 0,
+          P4: 0,
+          P5: 0,
+        },
+        topScore: 0,
+      },
+      top: [],
+    },
     suggestions: [],
     rules: [],
     decisions: [],
@@ -321,6 +339,21 @@ function loadState(root) {
       fileIndex: parsed.fileIndex || {},
       violations: parsed.violations || [],
       waivedViolations: parsed.waivedViolations || [],
+      actionability: {
+        ...initial.actionability,
+        ...(parsed.actionability || {}),
+        summary: {
+          ...initial.actionability.summary,
+          ...((parsed.actionability && parsed.actionability.summary) || {}),
+          distribution: {
+            ...initial.actionability.summary.distribution,
+            ...((parsed.actionability &&
+              parsed.actionability.summary &&
+              parsed.actionability.summary.distribution) || {}),
+          },
+        },
+        top: Array.isArray(parsed.actionability?.top) ? parsed.actionability.top : [],
+      },
       suggestions: parsed.suggestions || [],
       rules: resolvedRules,
       decisions: resolvedDecisions,

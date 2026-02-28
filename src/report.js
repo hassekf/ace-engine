@@ -133,6 +133,10 @@ const REPORT_LOCALES = {
     dependencyVulnerabilitiesEmpty: 'Nenhuma vulnerabilidade aberta detectada nos audits disponíveis.',
     recentViolations: 'Inconsistências Recentes',
     recentViolationsEmpty: 'Nenhuma inconsistência registrada no momento.',
+    actionabilitySummary: 'Actionability',
+    actionabilityHighPriority: 'High priority',
+    actionabilityAverage: 'Média',
+    actionabilityTop: 'Topo',
     topHotspots: 'Top Hotspots',
     topHotspotsEmpty: 'Sem hotspots no momento.',
     hotspotConcentration: 'Concentração de Hotspots',
@@ -196,7 +200,10 @@ const REPORT_LOCALES = {
     searchDependencyPlaceholder: 'package, CVE, advisory, fix...',
     searchViolationsPlaceholder: 'tipo, arquivo, mensagem...',
     visibleSuffix: 'visíveis',
+    allPriorities: 'Todas',
     type: 'Tipo',
+    actionability: 'Actionability',
+    priority: 'Prioridade',
     file: 'Arquivo',
     message: 'Mensagem',
     suggestion: 'Sugestão',
@@ -310,6 +317,10 @@ const REPORT_LOCALES = {
     dependencyVulnerabilitiesEmpty: 'No open vulnerabilities detected in available audits.',
     recentViolations: 'Recent Inconsistencies',
     recentViolationsEmpty: 'No inconsistencies recorded right now.',
+    actionabilitySummary: 'Actionability',
+    actionabilityHighPriority: 'High priority',
+    actionabilityAverage: 'Average',
+    actionabilityTop: 'Top',
     topHotspots: 'Top Hotspots',
     topHotspotsEmpty: 'No hotspots at the moment.',
     hotspotConcentration: 'Hotspot Concentration',
@@ -373,7 +384,10 @@ const REPORT_LOCALES = {
     searchDependencyPlaceholder: 'package, CVE, advisory, fix...',
     searchViolationsPlaceholder: 'type, file, message...',
     visibleSuffix: 'visible',
+    allPriorities: 'All',
     type: 'Type',
+    actionability: 'Actionability',
+    priority: 'Priority',
     file: 'File',
     message: 'Message',
     suggestion: 'Suggestion',
@@ -814,6 +828,29 @@ function severityBadge(severity) {
   return 'badge badge-low';
 }
 
+function actionabilityBadge(priority) {
+  const normalized = String(priority || '').toUpperCase();
+  if (normalized === 'P1') return 'badge badge-high';
+  if (normalized === 'P2') return 'badge badge-high';
+  if (normalized === 'P3') return 'badge badge-medium';
+  if (normalized === 'P4') return 'badge badge-low';
+  return 'badge badge-low';
+}
+
+function actionabilityFallback(item) {
+  const severity = String(item?.severity || 'low').toLowerCase();
+  if (severity === 'critical') {
+    return { priority: 'P1', score: 90, index: 5 };
+  }
+  if (severity === 'high') {
+    return { priority: 'P2', score: 76, index: 4 };
+  }
+  if (severity === 'medium') {
+    return { priority: 'P3', score: 60, index: 3 };
+  }
+  return { priority: 'P4', score: 45, index: 2 };
+}
+
 function controlStatusClass(status) {
   if (status === 'fail') {
     return 'badge badge-high';
@@ -1020,6 +1057,9 @@ function generateHtmlReport(state, options = {}) {
     : copy.regressionNone;
 
   const violations = state.violations || [];
+  const actionability = state.actionability || {};
+  const actionabilitySummary = actionability.summary || {};
+  const actionabilityDistribution = actionabilitySummary.distribution || {};
   const waivedViolations = state.waivedViolations || [];
   const suggestions = state.suggestions || [];
   const rules = state.rules || [];
@@ -1152,6 +1192,20 @@ function generateHtmlReport(state, options = {}) {
       </div>`;
     })
     .join('');
+  const sortedViolations = [...violations].sort((a, b) => {
+    const scoreDiff = Number(b.actionabilityScore || 0) - Number(a.actionabilityScore || 0);
+    if (scoreDiff !== 0) {
+      return scoreDiff;
+    }
+    const rank = { critical: 5, high: 4, medium: 3, low: 2 };
+    const severityDiff =
+      (rank[String(b.severity || 'low').toLowerCase()] || 0) -
+      (rank[String(a.severity || 'low').toLowerCase()] || 0);
+    if (severityDiff !== 0) {
+      return severityDiff;
+    }
+    return String(a.id || '').localeCompare(String(b.id || ''));
+  });
   const healthDomainCards = buildHealthDomains(state, copy)
     .map(
       (item) => `
@@ -1395,17 +1449,21 @@ function generateHtmlReport(state, options = {}) {
     })
     .join('');
 
-  const filteredViolationRows = violations
+  const filteredViolationRows = sortedViolations
     .slice(0, 200)
     .map((item) => {
       const translatedType = translateDynamicText(item.type, copy.code);
       const translatedMessage = translateDynamicText(item.message, copy.code);
       const translatedSuggestion = translateDynamicText(item.suggestion || '-', copy.code);
       const severity = String(item.severity || 'low').toLowerCase();
+      const fallback = actionabilityFallback(item);
+      const actionabilityPriority = String(item.actionabilityPriority || fallback.priority).toUpperCase();
+      const actionabilityScore = Number(item.actionabilityScore || fallback.score);
       const search = `${translatedType || ''} ${item.file || ''} ${translatedMessage || ''} ${translatedSuggestion || ''}`.toLowerCase();
       return `
-      <tr data-severity="${escapeHtml(severity)}" data-search="${escapeHtml(search)}">
+      <tr data-severity="${escapeHtml(severity)}" data-priority="${escapeHtml(actionabilityPriority.toLowerCase())}" data-search="${escapeHtml(search)}">
         <td><span class="${severityBadge(item.severity)}">${escapeHtml(item.severity)}</span></td>
+        <td><span class="${actionabilityBadge(actionabilityPriority)}">${escapeHtml(actionabilityPriority)} · ${actionabilityScore}</span></td>
         <td>${escapeHtml(translatedType)}</td>
         <td><code>${escapeHtml(item.file)}:${Number(item.line || 1)}</code></td>
         <td>${escapeHtml(translatedMessage)}</td>
@@ -1723,7 +1781,7 @@ function generateHtmlReport(state, options = {}) {
     }
 
     .filters.filters-compact {
-      grid-template-columns: minmax(140px, 200px) minmax(220px, 1fr) auto auto;
+      grid-template-columns: minmax(120px, 170px) minmax(120px, 170px) minmax(220px, 1fr) auto auto;
     }
 
     .filter-field {
@@ -2629,6 +2687,15 @@ function generateHtmlReport(state, options = {}) {
 
     <section class="panel" id="violations-panel">
       <h2 class="panel-title">${escapeHtml(copy.recentViolations)}</h2>
+      <div class="panel-meta">
+        <span>${escapeHtml(copy.actionabilitySummary)}: <strong>${Number(actionabilitySummary.total || violations.length)}</strong></span>
+        <span>${escapeHtml(copy.actionabilityHighPriority)} (P1+P2): <strong>${Number(actionabilitySummary.highPriority || 0)}</strong></span>
+        <span>${escapeHtml(copy.actionabilityAverage)}: <strong>${Number(actionabilitySummary.averageScore || 0)}</strong></span>
+        <span>${escapeHtml(copy.actionabilityTop)}: <strong>${Number(actionabilitySummary.topScore || 0)}</strong></span>
+        <span>P1: <strong>${Number(actionabilityDistribution.P1 || 0)}</strong></span>
+        <span>P2: <strong>${Number(actionabilityDistribution.P2 || 0)}</strong></span>
+        <span>P3: <strong>${Number(actionabilityDistribution.P3 || 0)}</strong></span>
+      </div>
       ${violations.length === 0
         ? `<p class="empty">${escapeHtml(copy.recentViolationsEmpty)}</p>`
         : `<div class="filters filters-compact" id="violations-filters">
@@ -2639,6 +2706,17 @@ function generateHtmlReport(state, options = {}) {
               <option value="high">${escapeHtml(copy.high)}</option>
               <option value="medium">${escapeHtml(copy.medium)}</option>
               <option value="low">${escapeHtml(copy.low)}</option>
+            </select>
+          </label>
+          <label class="filter-field">
+            <span>${escapeHtml(copy.priority)}</span>
+            <select id="violation-priority">
+              <option value="">${escapeHtml(copy.allPriorities || copy.allFem)}</option>
+              <option value="p1">P1</option>
+              <option value="p2">P2</option>
+              <option value="p3">P3</option>
+              <option value="p4">P4</option>
+              <option value="p5">P5</option>
             </select>
           </label>
           <label class="filter-field">
@@ -2653,6 +2731,7 @@ function generateHtmlReport(state, options = {}) {
             <thead>
               <tr>
                 <th>${escapeHtml(copy.severity)}</th>
+                <th>${escapeHtml(copy.actionability)}</th>
                 <th>${escapeHtml(copy.type)}</th>
                 <th>${escapeHtml(copy.file)}</th>
                 <th>${escapeHtml(copy.message)}</th>
@@ -2904,6 +2983,7 @@ function generateHtmlReport(state, options = {}) {
         if (!tbody) return;
 
         const severityEl = document.getElementById('violation-severity');
+        const priorityEl = document.getElementById('violation-priority');
         const searchEl = document.getElementById('violation-search');
         const clearEl = document.getElementById('violation-clear');
         const counterEl = document.getElementById('violation-counter');
@@ -2911,13 +2991,15 @@ function generateHtmlReport(state, options = {}) {
 
         function render() {
           const severity = asLower(severityEl.value);
+          const priority = asLower(priorityEl.value);
           const search = asLower(searchEl.value);
           let visible = 0;
 
           rows.forEach(function (row) {
             const okSeverity = !severity || row.dataset.severity === severity;
+            const okPriority = !priority || row.dataset.priority === priority;
             const okSearch = !search || (row.dataset.search || '').includes(search);
-            const ok = okSeverity && okSearch;
+            const ok = okSeverity && okPriority && okSearch;
             row.style.display = ok ? '' : 'none';
             if (ok) visible += 1;
           });
@@ -2926,9 +3008,11 @@ function generateHtmlReport(state, options = {}) {
         }
 
         severityEl.addEventListener('change', render);
+        priorityEl.addEventListener('change', render);
         searchEl.addEventListener('input', render);
         clearEl.addEventListener('click', function () {
           severityEl.value = '';
+          priorityEl.value = '';
           searchEl.value = '';
           render();
         });

@@ -7,6 +7,7 @@ const { aggregateFromFileIndex, computeCoverage } = require('./coverage');
 const { buildSuggestions } = require('./suggestions');
 const { inferPatternModel, detectPatternDriftViolations, aggregatePatternDriftViolations } = require('./patterns');
 const { loadPatternRegistry } = require('./pattern-registry');
+const { scoreViolationsActionability } = require('./actionability');
 const { evaluateSecurityBaseline } = require('./security-baseline');
 const { loadAceConfig, isIgnoredPath, applyWaivers, updateWaiver } = require('./config');
 const { loadState, saveState, appendHistorySnapshot } = require('./state');
@@ -159,6 +160,15 @@ function createSummary({ state, newViolations, resolvedViolations, reportPath })
     securityWarnings: Number(state.security?.totals?.warning || 0),
     totalViolations: state.violations.length,
     waivedViolations: (state.waivedViolations || []).length,
+    actionability: state.actionability?.summary || {
+      total: state.violations.length,
+      averageScore: 0,
+      highPriority: 0,
+      withTestSignal: 0,
+      withoutTestSignal: state.violations.length,
+      distribution: { P1: 0, P2: 0, P3: 0, P4: 0, P5: 0 },
+      topScore: 0,
+    },
     cacheHits: Number(state.lastScan?.cacheHits || 0),
     analyzedFiles: Number(state.lastScan?.analyzedFiles || 0),
     ignoredFiles: Number(state.lastScan?.ignoredFiles || 0),
@@ -310,9 +320,15 @@ function runScan({ root, scope = 'changed', explicitFiles = [], writeHtml = true
     }
   });
 
+  const actionability = scoreViolationsActionability({
+    violations: waiverApplied.violations,
+    fileIndex: nextFileIndex,
+  });
+  const activeViolations = actionability.violations;
+
   const coveragePayload = computeCoverage({
     metrics: aggregate.metrics,
-    violations: waiverApplied.violations,
+    violations: activeViolations,
     scannedFiles: Object.keys(nextFileIndex).length,
     totalPhpFiles: totalPhpFiles.length,
     model: patternModel,
@@ -323,7 +339,7 @@ function runScan({ root, scope = 'changed', explicitFiles = [], writeHtml = true
   const securityPayload = evaluateSecurityBaseline({
     root,
     metrics: aggregate.metrics,
-    violations: waiverApplied.violations,
+    violations: activeViolations,
     fileIndex: nextFileIndex,
     previousSecurityMetadata: previousState.security?.metadata || {},
     auditOptions: config.security?.audits || {},
@@ -333,14 +349,14 @@ function runScan({ root, scope = 'changed', explicitFiles = [], writeHtml = true
     metrics: aggregate.metrics,
     coverage: coveragePayload.coverage,
     model: coveragePayload.model,
-    violations: waiverApplied.violations,
+    violations: activeViolations,
     security: securityPayload,
   });
 
   const previousViolationIds = new Set((previousState.violations || []).map((item) => item.id));
-  const currentViolationIds = new Set(waiverApplied.violations.map((item) => item.id));
+  const currentViolationIds = new Set(activeViolations.map((item) => item.id));
 
-  const newViolations = waiverApplied.violations.filter((item) => !previousViolationIds.has(item.id));
+  const newViolations = activeViolations.filter((item) => !previousViolationIds.has(item.id));
   const resolvedViolations = (previousState.violations || []).filter(
     (item) => !currentViolationIds.has(item.id),
   );
@@ -366,8 +382,12 @@ function runScan({ root, scope = 'changed', explicitFiles = [], writeHtml = true
     model: coveragePayload.model,
     security: securityPayload,
     trend: trendPayload,
-    violations: waiverApplied.violations,
+    violations: activeViolations,
     waivedViolations: waiverApplied.waivedViolations,
+    actionability: {
+      summary: actionability.summary,
+      top: actionability.ranking.slice(0, 60),
+    },
     suggestions,
     fileIndex: nextFileIndex,
     lastScan: {
@@ -382,6 +402,8 @@ function runScan({ root, scope = 'changed', explicitFiles = [], writeHtml = true
       trendStatus: trendPayload.coverage.status,
       regressionAlert: Boolean(trendPayload.coverage.regression?.triggered),
       testQualityScore: Number(coveragePayload.coverage?.testQuality?.score || 0),
+      actionabilityHighPriority: Number(actionability.summary?.highPriority || 0),
+      actionabilityAverage: Number(actionability.summary?.averageScore || 0),
       analyzedAt: now,
     },
     history: [
@@ -402,7 +424,9 @@ function runScan({ root, scope = 'changed', explicitFiles = [], writeHtml = true
         regressionAlert: Boolean(trendPayload.coverage.regression?.triggered),
         testability: Number(coveragePayload.coverage?.dimensions?.testability || 0),
         testQuality: Number(coveragePayload.coverage?.testQuality?.score || 0),
-        violationCount: waiverApplied.violations.length,
+        violationCount: activeViolations.length,
+        actionabilityHighPriority: Number(actionability.summary?.highPriority || 0),
+        actionabilityAverage: Number(actionability.summary?.averageScore || 0),
         securityFailures: Number(securityPayload.totals?.fail || 0),
       },
     ].slice(-160),

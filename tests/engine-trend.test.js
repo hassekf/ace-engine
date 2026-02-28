@@ -67,6 +67,8 @@ class LegacyController extends Controller
   assert.equal(summary.trendStatus, 'degrading');
   assert.equal(summary.regressionAlert.triggered, true);
   assert.ok(summary.regressionAlert.drop >= 5);
+  assert.equal(typeof summary.actionability, 'object');
+  assert.equal(typeof summary.actionability.averageScore, 'number');
 
   const state = loadState(root);
   assert.equal(state.trend.coverage.status, 'degrading');
@@ -79,4 +81,7 @@ class LegacyController extends Controller
   assert.equal(typeof latestHistory.securityFailures, 'number');
   assert.equal(typeof latestHistory.testability, 'number');
   assert.equal(typeof latestHistory.testQuality, 'number');
+  assert.equal(typeof latestHistory.actionabilityHighPriority, 'number');
+  assert.equal(typeof latestHistory.actionabilityAverage, 'number');
+  assert.equal(typeof state.actionability.summary.highPriority, 'number');
 });

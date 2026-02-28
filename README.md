@@ -19,6 +19,7 @@ ACE makes this drift visible and measurable — without requiring any configurat
 - **Tracks decisions**: formalize architectural decisions and rules that your team agreed on
 - **Stack-aware security**: evaluates Laravel, Filament, Livewire, Sanctum, Spatie Permission, and Horizon controls
 - **Runtime dependency audit**: surfaces Composer/NPM vulnerabilities directly in the report (with severity and fix hints)
+- **Actionability Index**: each inconsistency gets a priority score (`P1..P5`) based on severity, recurrence, hotspot concentration, and test signal
 - **LLM-native**: MCP server lets Claude, Codex, Cursor, Copilot, or any MCP-compatible LLM query your architecture in real-time
 - **Incremental**: SHA1 cache means re-scans only analyze changed files
 - **Zero dependencies**: pure Node.js stdlib, runs everywhere Node 18+ runs
@@ -112,6 +113,7 @@ The report includes:
 - in-page language selector (`en-US` / `pt-BR`)
 - trend correlations
 - hotspot concentration summary (violation clustering by file)
+- actionability summary for inconsistencies (`P1..P5` + average score)
 - pattern drift waves (aggregated drift alerts)
 - evidence accordions per security control
 - clickable KPI cards (jump/filter by relevant panel)
@@ -293,7 +295,7 @@ After running `ace init`, MCP configuration snippets are generated in `.ace/inte
 | `ace.get_trend` | Temporal analysis for coverage, security, and violations |
 | `ace.get_project_model` | Pattern model and metrics |
 | `ace.get_security` | Security baseline evaluation |
-| `ace.report_inconsistencies` | Violations filtered by severity/type/file |
+| `ace.report_inconsistencies` | Violations with actionability ranking (`P1..P5`), optional priority filter, and actionability/severity sorting |
 | `ace.scan_scope` | Trigger scan (all, changed, or specific files) |
 | `ace.get_learning_bundle` | Context bundle for LLM reasoning |
 | `ace.get_modules` | Detected stack modules with docs |
