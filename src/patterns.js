@@ -371,7 +371,106 @@ function detectPatternDriftViolations({ fileIndex, model, registry }) {
   return violations;
 }
 
+function driftPatternKey(violation) {
+  if (!violation || typeof violation.type !== 'string') {
+    return null;
+  }
+  if (!violation.type.startsWith('pattern-drift:')) {
+    return null;
+  }
+  return violation.type.slice('pattern-drift:'.length);
+}
+
+function driftSeverityWeight(severity) {
+  if (severity === 'critical') return 4;
+  if (severity === 'high') return 3;
+  if (severity === 'medium') return 2;
+  return 1;
+}
+
+function aggregatePatternDriftViolations(violations = [], options = {}) {
+  const threshold = Math.max(2, Number(options.threshold || 3));
+  const maxFiles = Math.max(5, Number(options.maxFiles || 40));
+
+  const passthrough = [];
+  const grouped = new Map();
+
+  (violations || []).forEach((violation) => {
+    const patternKey = driftPatternKey(violation);
+    if (!patternKey) {
+      passthrough.push(violation);
+      return;
+    }
+    const bucket = grouped.get(patternKey) || [];
+    bucket.push(violation);
+    grouped.set(patternKey, bucket);
+  });
+
+  const aggregated = [];
+  const waves = [];
+
+  grouped.forEach((items, patternKey) => {
+    const sorted = [...items].sort((a, b) => driftSeverityWeight(b.severity) - driftSeverityWeight(a.severity));
+    const representative = sorted[0];
+    const uniqueFiles = Array.from(new Set(items.map((item) => item.file).filter(Boolean)));
+    const expected = representative?.evidence?.expected || null;
+    const actualCounts = {};
+    items.forEach((item) => {
+      const actual = item?.evidence?.actual || 'unknown';
+      actualCounts[actual] = Number(actualCounts[actual] || 0) + 1;
+    });
+
+    const wave = {
+      key: patternKey,
+      count: items.length,
+      severity: representative?.severity || 'low',
+      expected,
+      files: uniqueFiles.slice(0, maxFiles),
+      hiddenFiles: Math.max(0, uniqueFiles.length - maxFiles),
+      actualCounts,
+      confidence: Number(representative?.evidence?.confidence || 0),
+    };
+    waves.push(wave);
+
+    if (items.length < threshold) {
+      aggregated.push(...items);
+      return;
+    }
+
+    aggregated.push({
+      id: slugify(`pattern-wave:${patternKey}:${items.length}:${uniqueFiles.length}`),
+      type: `pattern-drift-wave:${patternKey}`,
+      severity: representative?.severity || 'medium',
+      file: uniqueFiles[0] || `pattern:${patternKey}`,
+      line: 1,
+      message: `${items.length} arquivo(s) divergiram do padrão esperado em ${patternKey}.`,
+      suggestion:
+        representative?.suggestion ||
+        'Alinhe os arquivos ao padrão esperado ou formalize decisão arquitetural específica.',
+      rationale:
+        'Agregação de drift por pattern para destacar ondas de inconsistência em vez de ruído por arquivo.',
+      evidence: {
+        patternKey,
+        expected,
+        count: items.length,
+        files: uniqueFiles.slice(0, maxFiles),
+        hiddenFiles: Math.max(0, uniqueFiles.length - maxFiles),
+        actualCounts,
+        confidence: Number(representative?.evidence?.confidence || 0),
+      },
+    });
+  });
+
+  waves.sort((a, b) => b.count - a.count || driftSeverityWeight(b.severity) - driftSeverityWeight(a.severity));
+
+  return {
+    violations: [...passthrough, ...aggregated],
+    waves,
+  };
+}
+
 module.exports = {
   inferPatternModel,
   detectPatternDriftViolations,
+  aggregatePatternDriftViolations,
 };

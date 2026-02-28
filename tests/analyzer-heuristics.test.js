@@ -106,6 +106,112 @@ class PaginatedUsersService
   assert.ok(!types.has('unbounded-get-query'));
 });
 
+test('analyzer ignores non-query ->get() calls without query context', () => {
+  const root = makeTmpRoot();
+  const file = path.join(root, 'app', 'Services', 'CacheReadService.php');
+
+  writePhp(
+    file,
+    `<?php
+namespace App\\Services;
+
+class CacheReadService
+{
+    public function run($cache, $config)
+    {
+        $cacheValue = $cache->get();
+        $configValue = $config->get();
+
+        return [$cacheValue, $configValue];
+    }
+}
+`,
+  );
+
+  const payload = analyzeFiles({
+    root,
+    files: [file],
+    testBasenames: new Set(),
+    thresholds: {},
+  });
+
+  const entry = payload['app/Services/CacheReadService.php'];
+  assert.ok(entry, 'entry should exist');
+  assert.equal(entry.metrics.unboundedGetCalls, 0);
+  const types = new Set((entry.violations || []).map((item) => item.type));
+  assert.ok(!types.has('unbounded-get-query'));
+});
+
+test('analyzer does not require tests for thin models by default', () => {
+  const root = makeTmpRoot();
+  const file = path.join(root, 'app', 'Models', 'Currency.php');
+
+  writePhp(
+    file,
+    `<?php
+namespace App\\Models;
+
+use Illuminate\\Database\\Eloquent\\Model;
+
+class Currency extends Model
+{
+    protected $fillable = ['code', 'name'];
+}
+`,
+  );
+
+  const payload = analyzeFiles({
+    root,
+    files: [file],
+    testBasenames: new Set(),
+    thresholds: {},
+  });
+
+  const entry = payload['app/Models/Currency.php'];
+  assert.ok(entry, 'entry should exist');
+  assert.equal(entry.metrics.testTargets, 0);
+  assert.equal(entry.metrics.missingTests, 0);
+  const types = new Set((entry.violations || []).map((item) => item.type));
+  assert.ok(!types.has('missing-test'));
+});
+
+test('analyzer requires tests for complex models', () => {
+  const root = makeTmpRoot();
+  const file = path.join(root, 'app', 'Models', 'Ledger.php');
+
+  writePhp(
+    file,
+    `<?php
+namespace App\\Models;
+
+use Illuminate\\Database\\Eloquent\\Model;
+
+class Ledger extends Model
+{
+    public function one() {}
+    public function two() {}
+    public function three() {}
+    public function four() {}
+    public function five() {}
+}
+`,
+  );
+
+  const payload = analyzeFiles({
+    root,
+    files: [file],
+    testBasenames: new Set(),
+    thresholds: {},
+  });
+
+  const entry = payload['app/Models/Ledger.php'];
+  assert.ok(entry, 'entry should exist');
+  assert.equal(entry.metrics.testTargets, 1);
+  assert.equal(entry.metrics.missingTests, 1);
+  const types = new Set((entry.violations || []).map((item) => item.type));
+  assert.ok(types.has('missing-test'));
+});
+
 test('analyzer counts constructor-injected Action/UseCase as service usage in controller and classifies app/Actions as service kind', () => {
   const root = makeTmpRoot();
   const controllerFile = path.join(root, 'app', 'Http', 'Controllers', 'AccountController.php');

@@ -8,7 +8,6 @@ const {
 } = require('../decisions');
 const { buildLearningBundle } = require('../learning');
 const { loadAceConfig, addWaiver, updateWaiver, listWaivers, initAceConfig } = require('../config');
-const { scaffoldIntegration } = require('../init');
 const {
   listPatterns,
   upsertPattern,
@@ -32,6 +31,140 @@ function toToolResponse(data) {
   };
 }
 
+function toFiniteNumber(value, fallback = 0) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) {
+    return Number(fallback || 0);
+  }
+  return numeric;
+}
+
+function normalizeTrendWindow(value) {
+  const numeric = Math.round(Number(value));
+  if (!Number.isFinite(numeric) || numeric <= 0) {
+    return 24;
+  }
+  return Math.max(6, Math.min(160, numeric));
+}
+
+function summarizeSeries(values = []) {
+  if (!values.length) {
+    return {
+      latest: 0,
+      first: 0,
+      deltaWindow: 0,
+      averageStep: 0,
+      max: 0,
+      min: 0,
+    };
+  }
+
+  const first = toFiniteNumber(values[0]);
+  const latest = toFiniteNumber(values[values.length - 1]);
+  const deltaWindow = Number((latest - first).toFixed(2));
+  const averageStep =
+    values.length > 1
+      ? Number((deltaWindow / (values.length - 1)).toFixed(2))
+      : 0;
+
+  return {
+    latest,
+    first,
+    deltaWindow,
+    averageStep,
+    max: Math.max(...values.map((value) => toFiniteNumber(value))),
+    min: Math.min(...values.map((value) => toFiniteNumber(value))),
+  };
+}
+
+function buildTrendPayload(state, args = {}) {
+  const window = normalizeTrendWindow(args.window);
+  const history = Array.isArray(state.history) ? state.history : [];
+  const recent = history.slice(-window);
+  const fallbackTimestamp = state.updatedAt || new Date().toISOString();
+  const seriesSource =
+    recent.length > 0
+      ? recent
+      : [
+          {
+            timestamp: fallbackTimestamp,
+            overall: Number(state.coverage?.overall || 0),
+            securityScore: Number(state.security?.score || 0),
+            violationCount: Number(state.violations?.length || 0),
+            newViolations: Number(state.lastScan?.newViolations || 0),
+            resolvedViolations: Number(state.lastScan?.resolvedViolations || 0),
+            scope: String(state.lastScan?.scope || 'current'),
+            files: Number(state.coverage?.scannedFiles || 0),
+          },
+        ];
+
+  const points = seriesSource.map((item) => ({
+    timestamp: item.timestamp || fallbackTimestamp,
+    overall: toFiniteNumber(item.overall),
+    securityScore: toFiniteNumber(item.securityScore),
+    violationCount: toFiniteNumber(item.violationCount),
+    newViolations: toFiniteNumber(item.newViolations),
+    resolvedViolations: toFiniteNumber(item.resolvedViolations),
+    files: toFiniteNumber(item.files),
+    scope: String(item.scope || 'unknown'),
+  }));
+
+  const coverageValues = points.map((item) => item.overall);
+  const securityValues = points.map((item) => item.securityScore);
+  const violationValues = points.map((item) => item.violationCount);
+
+  return {
+    schemaVersion: OUTPUT_SCHEMA_VERSION,
+    generatedAt: state.updatedAt,
+    window,
+    samples: points.length,
+    trend: state.trend || {},
+    coverage: {
+      ...summarizeSeries(coverageValues),
+      status: state.trend?.coverage?.status || 'stable',
+      regression: state.trend?.coverage?.regression || {
+        triggered: false,
+        drop: 0,
+        threshold: 0,
+      },
+      series: points.map((item) => ({
+        timestamp: item.timestamp,
+        value: item.overall,
+      })),
+    },
+    security: {
+      ...summarizeSeries(securityValues),
+      status: state.trend?.security?.status || 'stable',
+      regression: state.trend?.security?.regression || {
+        triggered: false,
+        drop: 0,
+        threshold: 0,
+      },
+      series: points.map((item) => ({
+        timestamp: item.timestamp,
+        value: item.securityScore,
+      })),
+    },
+    violations: {
+      ...summarizeSeries(violationValues),
+      current: Number(state.violations?.length || 0),
+      newInWindow: points.reduce((sum, item) => sum + toFiniteNumber(item.newViolations), 0),
+      resolvedInWindow: points.reduce((sum, item) => sum + toFiniteNumber(item.resolvedViolations), 0),
+      series: points.map((item) => ({
+        timestamp: item.timestamp,
+        value: item.violationCount,
+      })),
+    },
+    scanActivity: points.map((item) => ({
+      timestamp: item.timestamp,
+      scope: item.scope,
+      files: item.files,
+      newViolations: item.newViolations,
+      resolvedViolations: item.resolvedViolations,
+    })),
+  };
+}
+
 function buildToolsManifest(profile = 'compact') {
   const fullTools = [
     {
@@ -50,6 +183,16 @@ function buildToolsManifest(profile = 'compact') {
         type: 'object',
         properties: {},
         additionalProperties: false,
+      },
+    },
+    {
+      name: 'ace.get_trend',
+      description: 'Retorna análise temporal de coverage, segurança e evolução de violações.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          window: { type: 'number' },
+        },
       },
     },
     {
@@ -195,16 +338,6 @@ function buildToolsManifest(profile = 'compact') {
       },
     },
     {
-      name: 'ace.init_project',
-      description: 'Scaffold de integração MCP/skills do ACE no projeto.',
-      inputSchema: {
-        type: 'object',
-        properties: {
-          force: { type: 'boolean' },
-        },
-      },
-    },
-    {
       name: 'ace.bootstrap_laravel',
       description:
         'Executa bootstrap Laravel: scan inicial, inclusão de patterns úteis e formalização opcional de decisões.',
@@ -220,191 +353,12 @@ function buildToolsManifest(profile = 'compact') {
         },
       },
     },
-    // Legacy tools (mantidas para compatibilidade em profile=full)
-    {
-      name: 'ace.formalize_rule',
-      description: 'Formaliza decisão arquitetural em regra versionada persistente.',
-      inputSchema: {
-        type: 'object',
-        properties: {
-          title: { type: 'string' },
-          description: { type: 'string' },
-          applies_to: {
-            anyOf: [{ type: 'array', items: { type: 'string' } }, { type: 'string' }],
-          },
-          constraints: {
-            anyOf: [{ type: 'array', items: { type: 'string' } }, { type: 'string' }],
-          },
-          source: { type: 'string' },
-        },
-        required: ['title'],
-      },
-    },
-    {
-      name: 'ace.update_rule',
-      description: 'Atualiza status de regra formalizada.',
-      inputSchema: {
-        type: 'object',
-        properties: {
-          id: { type: 'string' },
-          status: { type: 'string' },
-          note: { type: 'string' },
-          source: { type: 'string' },
-        },
-        required: ['id', 'status'],
-      },
-    },
-    {
-      name: 'ace.record_arch_decision',
-      description: 'Registra decisão arquitetural versionada usada pelo modelo de coverage.',
-      inputSchema: {
-        type: 'object',
-        properties: {
-          key: { type: 'string' },
-          preferred: { type: 'string' },
-          rationale: { type: 'string' },
-          source: { type: 'string' },
-          scope: { type: 'string' },
-        },
-        required: ['key', 'preferred'],
-      },
-    },
-    {
-      name: 'ace.list_arch_decisions',
-      description: 'Lista decisões arquiteturais registradas.',
-      inputSchema: {
-        type: 'object',
-        properties: {
-          key: { type: 'string' },
-          status: { type: 'string' },
-        },
-      },
-    },
-    {
-      name: 'ace.update_arch_decision',
-      description: 'Atualiza status de decisão arquitetural.',
-      inputSchema: {
-        type: 'object',
-        properties: {
-          id: { type: 'string' },
-          status: { type: 'string' },
-          note: { type: 'string' },
-          source: { type: 'string' },
-        },
-        required: ['id', 'status'],
-      },
-    },
-    {
-      name: 'ace.get_config',
-      description: 'Retorna configuração do ACE no projeto.',
-      inputSchema: {
-        type: 'object',
-        properties: {},
-        additionalProperties: false,
-      },
-    },
-    {
-      name: 'ace.init_config',
-      description: 'Cria config base do ACE (.ace/config.json).',
-      inputSchema: {
-        type: 'object',
-        properties: {
-          force: { type: 'boolean' },
-        },
-      },
-    },
-    {
-      name: 'ace.add_waiver',
-      description: 'Adiciona waiver para suprimir violações temporárias.',
-      inputSchema: {
-        type: 'object',
-        properties: {
-          type: { type: 'string' },
-          file: { type: 'string' },
-          severity: { type: 'string' },
-          contains: { type: 'string' },
-          reason: { type: 'string' },
-          until: { type: 'string' },
-          status: { type: 'string' },
-        },
-        required: ['reason'],
-      },
-    },
-    {
-      name: 'ace.update_waiver',
-      description: 'Atualiza waiver por id.',
-      inputSchema: {
-        type: 'object',
-        properties: {
-          id: { type: 'string' },
-          status: { type: 'string' },
-          reason: { type: 'string' },
-          until: { type: 'string' },
-        },
-        required: ['id'],
-      },
-    },
-    {
-      name: 'ace.list_waivers',
-      description: 'Lista waivers ativos/inativos/expirados.',
-      inputSchema: {
-        type: 'object',
-        properties: {
-          status: { type: 'string' },
-        },
-      },
-    },
-    {
-      name: 'ace.get_pattern_registry',
-      description: 'Lista patterns ativos/inativos do registry dinâmico.',
-      inputSchema: {
-        type: 'object',
-        properties: {},
-      },
-    },
-    {
-      name: 'ace.upsert_pattern',
-      description: 'Cria ou atualiza um pattern no registry dinâmico.',
-      inputSchema: {
-        type: 'object',
-        properties: {
-          pattern: { type: 'object' },
-        },
-        required: ['pattern'],
-      },
-    },
-    {
-      name: 'ace.set_pattern_enabled',
-      description: 'Ativa/desativa pattern por key.',
-      inputSchema: {
-        type: 'object',
-        properties: {
-          key: { type: 'string' },
-          enabled: { type: 'boolean' },
-        },
-        required: ['key', 'enabled'],
-      },
-    },
-    {
-      name: 'ace.remove_pattern',
-      description: 'Remove pattern do registry por key.',
-      inputSchema: {
-        type: 'object',
-        properties: {
-          key: { type: 'string' },
-        },
-        required: ['key'],
-      },
-    },
   ];
 
-  if (profile === 'full') {
-    return fullTools;
-  }
-
-  const compactSet = new Set([
+  const publicSet = new Set([
     'ace.get_status',
     'ace.get_coverage',
+    'ace.get_trend',
     'ace.get_security',
     'ace.get_project_model',
     'ace.report_inconsistencies',
@@ -416,11 +370,10 @@ function buildToolsManifest(profile = 'compact') {
     'ace.manage_waivers',
     'ace.manage_patterns',
     'ace.manage_config',
-    'ace.init_project',
     'ace.bootstrap_laravel',
   ]);
 
-  return fullTools.filter((tool) => compactSet.has(tool.name));
+  return fullTools.filter((tool) => publicSet.has(tool.name));
 }
 
 function createMessageWriter() {
@@ -502,6 +455,7 @@ function startMcpServer({ root, profile = null }) {
       return {
         schemaVersion: OUTPUT_SCHEMA_VERSION,
         coverage: state.coverage,
+        trend: state.trend || {},
         model: state.model,
         lastScan: state.lastScan,
         waivers: {
@@ -521,6 +475,11 @@ function startMcpServer({ root, profile = null }) {
     if (name === 'ace.get_coverage') {
       const state = loadState(root);
       return state.coverage;
+    }
+
+    if (name === 'ace.get_trend') {
+      const state = loadState(root);
+      return buildTrendPayload(state, args);
     }
 
     if (name === 'ace.get_security') {
@@ -593,29 +552,6 @@ function startMcpServer({ root, profile = null }) {
       throw new Error(`Ação inválida em ace.manage_rules: ${action}`);
     }
 
-    if (name === 'ace.formalize_rule') {
-      const result = formalizeRule({
-        root,
-        title: args.title,
-        description: args.description || '',
-        appliesTo: args.applies_to || [],
-        constraints: args.constraints || [],
-        source: args.source || 'mcp-consensus',
-      });
-
-      return result;
-    }
-
-    if (name === 'ace.update_rule') {
-      return updateRuleStatus({
-        root,
-        id: args.id,
-        status: args.status,
-        note: args.note || '',
-        source: args.source || 'mcp',
-      });
-    }
-
     if (name === 'ace.get_learning_bundle') {
       const state = loadState(root);
       return buildLearningBundle({
@@ -673,35 +609,6 @@ function startMcpServer({ root, profile = null }) {
       throw new Error(`Ação inválida em ace.manage_decisions: ${action}`);
     }
 
-    if (name === 'ace.record_arch_decision') {
-      return recordArchitecturalDecision({
-        root,
-        key: args.key,
-        preferred: args.preferred,
-        rationale: args.rationale || '',
-        source: args.source || 'mcp-consensus',
-        scope: args.scope || 'project',
-      });
-    }
-
-    if (name === 'ace.list_arch_decisions') {
-      return listArchitecturalDecisions({
-        root,
-        key: args.key || null,
-        status: args.status || null,
-      });
-    }
-
-    if (name === 'ace.update_arch_decision') {
-      return updateArchitecturalDecision({
-        root,
-        id: args.id,
-        status: args.status,
-        note: args.note || '',
-        source: args.source || 'mcp',
-      });
-    }
-
     if (name === 'ace.manage_config') {
       const action = String(args.action || 'get').toLowerCase();
       if (action === 'get') {
@@ -713,22 +620,6 @@ function startMcpServer({ root, profile = null }) {
         });
       }
       throw new Error(`Ação inválida em ace.manage_config: ${action}`);
-    }
-
-    if (name === 'ace.get_config') {
-      return loadAceConfig(root);
-    }
-
-    if (name === 'ace.init_config') {
-      return initAceConfig(root, {
-        force: Boolean(args.force),
-      });
-    }
-
-    if (name === 'ace.init_project') {
-      return scaffoldIntegration(root, {
-        force: Boolean(args.force),
-      });
     }
 
     if (name === 'ace.manage_waivers') {
@@ -759,32 +650,6 @@ function startMcpServer({ root, profile = null }) {
       throw new Error(`Ação inválida em ace.manage_waivers: ${action}`);
     }
 
-    if (name === 'ace.add_waiver') {
-      return addWaiver(root, {
-        type: args.type || null,
-        file: args.file || null,
-        severity: args.severity || null,
-        contains: args.contains || null,
-        reason: args.reason,
-        until: args.until || null,
-        status: args.status || 'active',
-      });
-    }
-
-    if (name === 'ace.update_waiver') {
-      const patch = {};
-      if (args.status) patch.status = args.status;
-      if (args.reason) patch.reason = args.reason;
-      if (args.until) patch.until = args.until;
-      return updateWaiver(root, args.id, patch);
-    }
-
-    if (name === 'ace.list_waivers') {
-      return listWaivers(root, {
-        status: args.status || null,
-      });
-    }
-
     if (name === 'ace.manage_patterns') {
       const action = String(args.action || 'list').toLowerCase();
       if (action === 'list') {
@@ -800,22 +665,6 @@ function startMcpServer({ root, profile = null }) {
         return removePattern(root, args.key);
       }
       throw new Error(`Ação inválida em ace.manage_patterns: ${action}`);
-    }
-
-    if (name === 'ace.get_pattern_registry') {
-      return listPatterns(root);
-    }
-
-    if (name === 'ace.upsert_pattern') {
-      return upsertPattern(root, args.pattern);
-    }
-
-    if (name === 'ace.set_pattern_enabled') {
-      return setPatternEnabled(root, args.key, Boolean(args.enabled));
-    }
-
-    if (name === 'ace.remove_pattern') {
-      return removePattern(root, args.key);
     }
 
     if (name === 'ace.bootstrap_laravel') {

@@ -27,6 +27,10 @@ test('initAceConfig creates default config', () => {
   assert.equal(config.security.audits.composer, true);
   assert.equal(config.security.audits.npm, true);
   assert.ok(config.security.audits.timeoutMs > 0);
+  assert.ok(config.analysis.driftWaveThreshold > 0);
+  assert.equal(config.enforcement.enabled, false);
+  assert.equal(config.enforcement.failOnRegression, true);
+  assert.ok(config.enforcement.thresholds.maxRegressionDrop > 0);
   assert.ok(Array.isArray(config.waivers));
 });
 

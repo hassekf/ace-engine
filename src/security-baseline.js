@@ -1198,6 +1198,33 @@ function computeOverallScore(byMode) {
   return Math.round(aggregate / totalWeight);
 }
 
+function computeDomainSummary(items = []) {
+  const byDomain = {
+    code: [],
+    pipeline: [],
+  };
+
+  items.forEach((item) => {
+    const category = String(item.category || '').toLowerCase();
+    if (category === 'pipeline') {
+      byDomain.pipeline.push(item);
+      return;
+    }
+    byDomain.code.push(item);
+  });
+
+  return {
+    code: {
+      ...computeCounts(byDomain.code),
+      score: computeScore(byDomain.code),
+    },
+    pipeline: {
+      ...computeCounts(byDomain.pipeline),
+      score: computeScore(byDomain.pipeline),
+    },
+  };
+}
+
 function sortControls(controls) {
   const modeOrder = { automated: 0, semi: 1, manual: 2 };
   return [...controls].sort((a, b) => {
@@ -1887,6 +1914,7 @@ function evaluateSecurityBaseline({
     ...computeCounts(sortedControls),
     score: computeOverallScore(modeSummary),
   };
+  const domainSummary = computeDomainSummary(sortedControls);
 
   const pageAuthControl = sortedControls.find((item) => item.id === 'filament.pages_authorization');
   const widgetAuthControl = sortedControls.find((item) => item.id === 'filament.widgets_authorization');
@@ -1933,6 +1961,7 @@ function evaluateSecurityBaseline({
     },
     score: totalSummary.score,
     filamentScores,
+    domainSummary,
     modeSummary,
     totals: totalSummary,
     controls: sortedControls,
@@ -1972,6 +2001,7 @@ function evaluateSecurityBaseline({
           : null,
       },
       filamentScores,
+      domainSummary,
       optionalStacks: {
         spatiePermission: hasSpatiePermission,
         sanctum: hasSanctum,

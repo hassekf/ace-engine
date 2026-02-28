@@ -115,6 +115,7 @@ function aggregateFromFileIndex(fileIndex) {
     unboundedGetCalls: 0,
     possibleNPlusOneRisks: 0,
     criticalWritesWithoutTransaction: 0,
+    testTargets: 0,
     missingTests: 0,
     testFiles: 0,
     testCases: 0,
@@ -364,12 +365,34 @@ function normalizeWeights(incoming = {}) {
   };
 }
 
+function computeConsistencyScore({ violations = [], scannedFiles = 0 }) {
+  const files = Math.max(1, Number(scannedFiles || 0));
+  const severityPenalty = violations.reduce((sum, item) => {
+    const weight = SEVERITY_WEIGHTS[item.severity] || SEVERITY_WEIGHTS.low;
+    return sum + weight;
+  }, 0);
+
+  const weightedSeverityPerFile = severityPenalty / files;
+  const violationRate = Number(violations.length || 0) / files;
+  const highImpactRate =
+    Number(violations.filter((item) => item.severity === 'high' || item.severity === 'critical').length) / files;
+
+  const penalty =
+    weightedSeverityPerFile * 14 +
+    violationRate * 30 +
+    highImpactRate * 40;
+
+  return clamp(Math.round(100 - penalty), 0, 100);
+}
+
 function computeCoverage({ metrics, violations, scannedFiles, totalPhpFiles, model = null, weights = null }) {
   const layering = computeLayeringScore({ metrics, model });
   const validation = computeValidationScore({ metrics, model });
   const authorization = computeAuthorizationScore({ metrics });
 
-  const testRelevantFiles = metrics.controllers + metrics.services + metrics.models;
+  const testRelevantFiles = Number(metrics.testTargets || 0) > 0
+    ? Number(metrics.testTargets || 0)
+    : metrics.controllers + metrics.services + metrics.models;
   const testabilityPresence =
     testRelevantFiles > 0 ? Math.round(((testRelevantFiles - metrics.missingTests) / testRelevantFiles) * 100) : 100;
   const testQuality = computeTestQuality({ metrics, presenceScore: clamp(testabilityPresence, 0, 100) });
@@ -379,12 +402,7 @@ function computeCoverage({ metrics, violations, scannedFiles, totalPhpFiles, mod
     100,
   );
 
-  const severityPenalty = violations.reduce((sum, item) => {
-    const weight = SEVERITY_WEIGHTS[item.severity] || SEVERITY_WEIGHTS.low;
-    return sum + weight;
-  }, 0);
-  const density = severityPenalty / Math.max(1, scannedFiles || 1);
-  const consistency = clamp(Math.round(100 * Math.exp(-density * 2.5)), 0, 100);
+  const consistency = computeConsistencyScore({ violations, scannedFiles });
 
   const normalizedWeights = normalizeWeights(weights || {});
   const overall = Math.round(

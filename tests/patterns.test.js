@@ -1,7 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const { inferPatternModel, detectPatternDriftViolations } = require('../src/patterns');
+const { inferPatternModel, detectPatternDriftViolations, aggregatePatternDriftViolations } = require('../src/patterns');
 
 function makeRegistry() {
   return {
@@ -159,4 +159,47 @@ test('detectPatternDriftViolations flags conflicting files for expected pattern'
   assert.equal(violations[0].type, 'pattern-drift:controller.data_access');
   assert.equal(violations[0].file, 'app/Http/Controllers/BadController.php');
   assert.equal(violations[0].severity, 'medium');
+});
+
+test('aggregatePatternDriftViolations groups repeated drift into a single wave alert', () => {
+  const violations = [
+    {
+      id: 'v1',
+      type: 'pattern-drift:controller.data_access',
+      severity: 'medium',
+      file: 'app/Http/Controllers/AController.php',
+      line: 1,
+      message: 'drift',
+      suggestion: 'fix',
+      evidence: { patternKey: 'controller.data_access', expected: 'service-layer', actual: 'direct-model', confidence: 88 },
+    },
+    {
+      id: 'v2',
+      type: 'pattern-drift:controller.data_access',
+      severity: 'low',
+      file: 'app/Http/Controllers/BController.php',
+      line: 1,
+      message: 'drift',
+      suggestion: 'fix',
+      evidence: { patternKey: 'controller.data_access', expected: 'service-layer', actual: 'direct-model', confidence: 88 },
+    },
+    {
+      id: 'v3',
+      type: 'pattern-drift:controller.data_access',
+      severity: 'low',
+      file: 'app/Http/Controllers/CController.php',
+      line: 1,
+      message: 'drift',
+      suggestion: 'fix',
+      evidence: { patternKey: 'controller.data_access', expected: 'service-layer', actual: 'direct-model', confidence: 88 },
+    },
+  ];
+
+  const aggregated = aggregatePatternDriftViolations(violations, { threshold: 3, maxFiles: 10 });
+  assert.equal(aggregated.waves.length, 1);
+  assert.equal(aggregated.waves[0].count, 3);
+  assert.equal(aggregated.waves[0].key, 'controller.data_access');
+  assert.equal(aggregated.violations.length, 1);
+  assert.equal(aggregated.violations[0].type, 'pattern-drift-wave:controller.data_access');
+  assert.equal(aggregated.violations[0].evidence.count, 3);
 });

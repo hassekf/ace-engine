@@ -13,6 +13,7 @@ test('aggregateFromFileIndex sums metrics including new performance/integrity co
         unboundedGetCalls: 2,
         possibleNPlusOneRisks: 1,
         criticalWritesWithoutTransaction: 0,
+        testTargets: 1,
         helpers: 1,
         helpersWithDirectModel: 1,
         validators: 1,
@@ -58,6 +59,7 @@ test('aggregateFromFileIndex sums metrics including new performance/integrity co
         unboundedGetCalls: 1,
         possibleNPlusOneRisks: 0,
         criticalWritesWithoutTransaction: 1,
+        testTargets: 2,
         helpers: 0,
         validators: 1,
         fatValidators: 1,
@@ -100,6 +102,7 @@ test('aggregateFromFileIndex sums metrics including new performance/integrity co
   assert.equal(payload.metrics.unboundedGetCalls, 3);
   assert.equal(payload.metrics.possibleNPlusOneRisks, 1);
   assert.equal(payload.metrics.criticalWritesWithoutTransaction, 1);
+  assert.equal(payload.metrics.testTargets, 3);
   assert.equal(payload.metrics.helpers, 1);
   assert.equal(payload.metrics.helpersWithDirectModel, 1);
   assert.equal(payload.metrics.validators, 2);
@@ -188,10 +191,10 @@ test('computeCoverage returns deterministic dimensions and overall score', () =>
     layering: 69,
     validation: 67,
     testability: 89,
-    consistency: 9,
+    consistency: 82,
     authorization: 15,
   });
-  assert.equal(result.coverage.overall, 53);
+  assert.equal(result.coverage.overall, 67);
   assert.equal(result.coverage.confidence, 50);
   assert.equal(result.model.stats.violationCount, 2);
   assert.equal(result.model.dominantPattern, 'service-layer');
@@ -279,4 +282,31 @@ test('computeCoverage blends test quality signals into testability', () => {
   assert.equal(result.coverage.testQuality.mocksPerCase, 1.5);
   assert.ok(result.coverage.dimensions.testability < 100);
   assert.equal(result.coverage.dimensions.testability, 83);
+});
+
+test('computeCoverage keeps consistency informative under realistic violation density', () => {
+  const violations = [
+    ...Array.from({ length: 34 }, () => ({ severity: 'low' })),
+    ...Array.from({ length: 20 }, () => ({ severity: 'medium' })),
+    ...Array.from({ length: 2 }, () => ({ severity: 'high' })),
+  ];
+
+  const result = computeCoverage({
+    metrics: {
+      controllers: 0,
+      services: 0,
+      models: 0,
+      missingTests: 0,
+    },
+    violations,
+    scannedFiles: 100,
+    totalPhpFiles: 100,
+    model: {
+      dominantPattern: 'unknown',
+      patterns: {},
+      decisionCount: 0,
+    },
+  });
+
+  assert.equal(result.coverage.dimensions.consistency, 45);
 });

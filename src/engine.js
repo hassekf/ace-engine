@@ -5,7 +5,7 @@ const { resolveScanScope, listTestBasenames, collectTestInsights } = require('./
 const { analyzeFiles, ANALYZER_VERSION } = require('./analyzer');
 const { aggregateFromFileIndex, computeCoverage } = require('./coverage');
 const { buildSuggestions } = require('./suggestions');
-const { inferPatternModel, detectPatternDriftViolations } = require('./patterns');
+const { inferPatternModel, detectPatternDriftViolations, aggregatePatternDriftViolations } = require('./patterns');
 const { loadPatternRegistry } = require('./pattern-registry');
 const { evaluateSecurityBaseline } = require('./security-baseline');
 const { loadAceConfig, isIgnoredPath, applyWaivers, updateWaiver } = require('./config');
@@ -292,7 +292,11 @@ function runScan({ root, scope = 'changed', explicitFiles = [], writeHtml = true
     model: patternModel,
     registry,
   });
-  const uniqueViolations = dedupeViolations([...aggregate.violations, ...patternViolations]);
+  const driftAggregation = aggregatePatternDriftViolations(patternViolations, {
+    threshold: Number(config.analysis?.driftWaveThreshold || 3),
+    maxFiles: Number(config.report?.hotspotLimit || 40),
+  });
+  const uniqueViolations = dedupeViolations([...aggregate.violations, ...driftAggregation.violations]);
   const waiverApplied = applyWaivers({
     violations: uniqueViolations,
     waivers: config.waivers || [],
@@ -314,6 +318,8 @@ function runScan({ root, scope = 'changed', explicitFiles = [], writeHtml = true
     model: patternModel,
     weights: config.coverage?.weights || {},
   });
+  coveragePayload.model.patternDriftWaves = driftAggregation.waves;
+  coveragePayload.model.patternDriftCount = patternViolations.length;
   const securityPayload = evaluateSecurityBaseline({
     root,
     metrics: aggregate.metrics,

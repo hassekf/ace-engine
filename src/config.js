@@ -15,6 +15,7 @@ function defaultConfig() {
     analysis: {
       ignorePaths: [],
       regressionThreshold: 5,
+      driftWaveThreshold: 3,
       trendWindow: 8,
       trendStableBand: 1.5,
       thresholds: {
@@ -53,6 +54,15 @@ function defaultConfig() {
         npm: true,
         timeoutMs: 15000,
         maxEntries: 120,
+      },
+    },
+    enforcement: {
+      enabled: false,
+      failOnRegression: true,
+      thresholds: {
+        minCoverage: 0,
+        maxRegressionDrop: 5,
+        maxSecurityFailures: 0,
       },
     },
     report: {
@@ -97,6 +107,14 @@ function mergeConfig(parsed = {}) {
       audits: {
         ...base.security.audits,
         ...((parsed.security && parsed.security.audits) || {}),
+      },
+    },
+    enforcement: {
+      ...base.enforcement,
+      ...(parsed.enforcement || {}),
+      thresholds: {
+        ...base.enforcement.thresholds,
+        ...((parsed.enforcement && parsed.enforcement.thresholds) || {}),
       },
     },
     report: {

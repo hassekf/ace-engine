@@ -70,7 +70,7 @@ ACE computes an **AchCoverage** score (0–100%) from five weighted dimensions:
 | **Layering** | 30% | Are controllers delegating to services consistently? Or using direct model calls consistently? ACE adapts to _your_ chosen pattern. |
 | **Validation** | 18% | FormRequest adoption vs inline validation. Penalizes `$request->all()` usage. |
 | **Testability** | 18% | Test presence + quality signals (assertion density, edge-case coverage, mock pressure, test files without asserts). |
-| **Consistency** | 19% | Violation density weighted by severity. Fewer violations = higher consistency. |
+| **Consistency** | 19% | Linear severity-weighted penalty normalized by scanned files (stable in large codebases). |
 | **Authorization** | 15% | Authorization signals, model↔policy presence, and auth hygiene in state-changing route surfaces. |
 
 Weights are configurable in `.ace/config.json`:
@@ -111,8 +111,11 @@ ace watch --interval=2200         # Watch for changes and re-scan
 The report includes:
 - in-page language selector (`en-US` / `pt-BR`)
 - trend correlations
+- hotspot concentration summary (violation clustering by file)
+- pattern drift waves (aggregated drift alerts)
 - evidence accordions per security control
 - clickable KPI cards (jump/filter by relevant panel)
+- security split cards (`Security Code` vs `Pipeline Maturity`)
 - dependency audit panel (Composer/NPM vulnerabilities)
 - pre-generated localized files for both languages
 
@@ -249,7 +252,7 @@ ACE includes a stdio-based [MCP](https://modelcontextprotocol.io/) server compat
 
 ```bash
 ace mcp                         # Compact profile (15 tools)
-ace mcp --profile=full          # Full profile (30 tools, includes legacy)
+ace mcp --profile=full          # Alias to the same consolidated 15-tool API
 ace mcp --root=/path/to/project # Analyze a different project
 ```
 
@@ -287,6 +290,7 @@ After running `ace init`, MCP configuration snippets are generated in `.ace/inte
 |---|---|
 | `ace.get_status` | Full project status |
 | `ace.get_coverage` | AchCoverage with dimensions |
+| `ace.get_trend` | Temporal analysis for coverage, security, and violations |
 | `ace.get_project_model` | Pattern model and metrics |
 | `ace.get_security` | Security baseline evaluation |
 | `ace.report_inconsistencies` | Violations filtered by severity/type/file |
@@ -298,10 +302,9 @@ After running `ace init`, MCP configuration snippets are generated in `.ace/inte
 | `ace.manage_waivers` | CRUD for violation waivers |
 | `ace.manage_patterns` | CRUD for pattern registry |
 | `ace.manage_config` | Read/write project config |
-| `ace.init_project` | Scaffold ACE layout |
 | `ace.bootstrap_laravel` | Auto-setup for Laravel projects |
 
-The `full` profile adds 15 legacy tools for backward compatibility with older configurations.
+`ace init` remains available via CLI for project onboarding/scaffolding.
 
 ## LLM Integration in Practice
 
@@ -414,6 +417,61 @@ LLM calls: ace.manage_decisions({
 
 Even without LLM integration, ACE works as a standalone CLI tool. Run `ace scan --scope=all` in CI or locally to get the same coverage, security, and consistency metrics.
 
+## Optional CI Enforcement (No Default Blocking)
+
+ACE **does not block CI by default**. Installing/running the package only analyzes and reports.
+
+If your team wants enforcement, enable it explicitly in your pipeline using `ace scan --json`.
+
+Recommended: keep enforcement policy versioned in `.ace/config.json` so the whole team shares the same gate.
+
+```json
+{
+  "enforcement": {
+    "enabled": false,
+    "failOnRegression": true,
+    "thresholds": {
+      "minCoverage": 40,
+      "maxRegressionDrop": 5,
+      "maxSecurityFailures": 0
+    }
+  }
+}
+```
+
+Example (optional gate in CI):
+
+```bash
+ace scan --scope=all --json > /tmp/ace-scan.json
+node -e '
+const fs = require("node:fs");
+const scan = JSON.parse(fs.readFileSync("/tmp/ace-scan.json", "utf8"));
+const cfg = JSON.parse(fs.readFileSync(".ace/config.json", "utf8"));
+const enforcement = cfg.enforcement || {};
+if (!enforcement.enabled) {
+  console.log("ACE enforcement disabled by config.");
+  process.exit(0);
+}
+const t = enforcement.thresholds || {};
+const failures = [];
+if ((scan.achCoverage ?? 0) < (t.minCoverage ?? 0)) failures.push(`AchCoverage below ${t.minCoverage}`);
+if ((enforcement.failOnRegression ?? true) && (scan.regressionAlert?.triggered ?? false)) {
+  const drop = Number(scan.regressionAlert?.drop ?? 0);
+  const maxDrop = Number(t.maxRegressionDrop ?? 5);
+  if (drop >= maxDrop) failures.push(`Coverage regression drop ${drop} >= ${maxDrop}`);
+}
+if ((scan.securityFailures ?? 0) > (t.maxSecurityFailures ?? 0)) failures.push(`Security failures > ${t.maxSecurityFailures}`);
+if (failures.length) {
+  console.error("ACE optional gate failed:");
+  failures.forEach((f) => console.error(" - " + f));
+  process.exit(1);
+}
+console.log("ACE optional gate passed.");
+'
+```
+
+This keeps the default developer experience non-blocking while still allowing strict projects to enforce quality/security in CI.
+
 ## Security Baseline
 
 ACE evaluates a security baseline tailored to your detected stack. Controls are only included when the relevant technology is detected.
@@ -520,7 +578,7 @@ ACE uses heuristic-based analysis (regex + brace/parenthesis matching) to detect
 ACE stores all artifacts in `.ace/`. Running `ace init` configures `.gitignore` automatically.
 
 **Versionable** (keep in git — shared with the team):
-- `.ace/config.json` — project configuration (thresholds, weights, ignore paths, waivers)
+- `.ace/config.json` — project configuration (thresholds, weights, ignore paths, waivers, enforcement policy)
 - `.ace/pattern-registry.json` — dynamic pattern registry
 - `.ace/rules.json` — formalized architectural rules
 - `.ace/decisions.json` — versioned architectural decisions
@@ -546,6 +604,7 @@ ACE stores all artifacts in `.ace/`. Running `ace init` configures `.gitignore` 
   "analysis": {
     "ignorePaths": ["app/Legacy", "app/Generated"],
     "regressionThreshold": 5,
+    "driftWaveThreshold": 3,
     "trendWindow": 8,
     "trendStableBand": 1.5,
     "thresholds": {
@@ -584,6 +643,15 @@ ACE stores all artifacts in `.ace/`. Running `ace init` configures `.gitignore` 
       "npm": true,
       "timeoutMs": 15000,
       "maxEntries": 120
+    }
+  },
+  "enforcement": {
+    "enabled": false,
+    "failOnRegression": true,
+    "thresholds": {
+      "minCoverage": 0,
+      "maxRegressionDrop": 5,
+      "maxSecurityFailures": 0
     }
   },
   "report": {
@@ -663,10 +731,10 @@ If you integrate ACE with scripts/CI bots, validate `schemaVersion` before parsi
 ```bash
 git clone https://github.com/hassekf/ace-engine.git
 cd ace
-npm test   # 42+ tests, fast feedback, no setup needed
+npm test   # 52+ tests, fast feedback, no setup needed
 ```
 
-Tests cover: analyzer heuristics, coverage computation, pattern inference, security baseline, state governance, scaffold initialization, module detection, MCP tool profiles, config management, decisions, learning bundles, and engine cache.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution workflow, MCP API policy, and release checklist.
 
 ## License
 

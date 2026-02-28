@@ -108,6 +108,24 @@ function createInitialState(root) {
           score: 0,
         },
       },
+      domainSummary: {
+        code: {
+          total: 0,
+          pass: 0,
+          warning: 0,
+          fail: 0,
+          unknown: 0,
+          score: 0,
+        },
+        pipeline: {
+          total: 0,
+          pass: 0,
+          warning: 0,
+          fail: 0,
+          unknown: 0,
+          score: 0,
+        },
+      },
       controls: [],
       highlights: [],
       metadata: {},
@@ -281,6 +299,18 @@ function loadState(root) {
           manual: {
             ...initial.security.modeSummary.manual,
             ...((parsed.security && parsed.security.modeSummary && parsed.security.modeSummary.manual) || {}),
+          },
+        },
+        domainSummary: {
+          ...initial.security.domainSummary,
+          ...((parsed.security && parsed.security.domainSummary) || {}),
+          code: {
+            ...initial.security.domainSummary.code,
+            ...((parsed.security && parsed.security.domainSummary && parsed.security.domainSummary.code) || {}),
+          },
+          pipeline: {
+            ...initial.security.domainSummary.pipeline,
+            ...((parsed.security && parsed.security.domainSummary && parsed.security.domainSummary.pipeline) || {}),
           },
         },
       },

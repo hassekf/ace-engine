@@ -89,6 +89,8 @@ const REPORT_LOCALES = {
     securitySemi: 'Security Semi',
     securityManual: 'Security Manual',
     securityStatus: 'Security Status',
+    securityCode: 'Security Code',
+    pipelineMaturity: 'Pipeline Maturity',
     filamentPagesSec: 'Filament Pages Sec',
     filamentWidgetsSec: 'Filament Widgets Sec',
     trendDiff: 'Trend & Diff',
@@ -133,6 +135,9 @@ const REPORT_LOCALES = {
     recentViolationsEmpty: 'Nenhuma inconsistência registrada no momento.',
     topHotspots: 'Top Hotspots',
     topHotspotsEmpty: 'Sem hotspots no momento.',
+    hotspotConcentration: 'Concentração de Hotspots',
+    filesWithViolations: 'Arquivos com inconsistências',
+    hotspotFiles: 'Arquivos hotspot',
     waivedViolationsTitle: 'Waived Violations',
     waivedViolationsEmpty: 'Nenhuma inconsistência está em waiver ativo.',
     quickWinsTitle: 'Quick Wins (Impacto Alto + Esforço Baixo)',
@@ -141,12 +146,14 @@ const REPORT_LOCALES = {
     proactiveSuggestionsEmpty: 'Sem sugestões proativas nesta execução.',
     inferredPatterns: 'Padrões Inferidos e Esperados',
     inferredPatternsEmpty: 'Ainda sem padrões inferidos. Execute um scan com escopo relevante.',
+    driftWavesTitle: 'Pattern Drift Waves',
+    driftWavesEmpty: 'Sem ondas de drift relevantes no momento.',
     activeRules: 'Regras Ativas (Formalizadas)',
     activeRulesEmpty:
-      'Nenhuma regra formalizada. Use MCP `ace.formalize_rule` ou CLI `ace rule:add`.',
+      'Nenhuma regra formalizada. Use MCP `ace.manage_rules` (action=create) ou CLI `ace rule:add`.',
     activeDecisions: 'Decisões Arquiteturais Ativas',
     activeDecisionsEmpty:
-      'Sem decisões ativas. Registre decisões com MCP `ace.record_arch_decision` ou CLI `ace decision:add`.',
+      'Sem decisões ativas. Registre decisões com MCP `ace.manage_decisions` (action=create) ou CLI `ace decision:add`.',
     status: 'Status',
     mode: 'Modo',
     severity: 'Severidade',
@@ -259,6 +266,8 @@ const REPORT_LOCALES = {
     securitySemi: 'Security Semi',
     securityManual: 'Security Manual',
     securityStatus: 'Security Status',
+    securityCode: 'Security Code',
+    pipelineMaturity: 'Pipeline Maturity',
     filamentPagesSec: 'Filament Pages Sec',
     filamentWidgetsSec: 'Filament Widgets Sec',
     trendDiff: 'Trend & Diff',
@@ -303,6 +312,9 @@ const REPORT_LOCALES = {
     recentViolationsEmpty: 'No inconsistencies recorded right now.',
     topHotspots: 'Top Hotspots',
     topHotspotsEmpty: 'No hotspots at the moment.',
+    hotspotConcentration: 'Hotspot Concentration',
+    filesWithViolations: 'Files with inconsistencies',
+    hotspotFiles: 'Hotspot files',
     waivedViolationsTitle: 'Waived Violations',
     waivedViolationsEmpty: 'No inconsistencies are currently waived.',
     quickWinsTitle: 'Quick Wins (High Impact + Low Effort)',
@@ -311,12 +323,14 @@ const REPORT_LOCALES = {
     proactiveSuggestionsEmpty: 'No proactive suggestions in this run.',
     inferredPatterns: 'Inferred and Expected Patterns',
     inferredPatternsEmpty: 'No patterns inferred yet. Run a scan with a relevant scope.',
+    driftWavesTitle: 'Pattern Drift Waves',
+    driftWavesEmpty: 'No relevant drift waves right now.',
     activeRules: 'Active Rules (Formalized)',
     activeRulesEmpty:
-      'No formalized rules yet. Use MCP `ace.formalize_rule` or CLI `ace rule:add`.',
+      'No formalized rules yet. Use MCP `ace.manage_rules` (action=create) or CLI `ace rule:add`.',
     activeDecisions: 'Active Architectural Decisions',
     activeDecisionsEmpty:
-      'No active decisions yet. Record decisions with MCP `ace.record_arch_decision` or CLI `ace decision:add`.',
+      'No active decisions yet. Record decisions with MCP `ace.manage_decisions` (action=create) or CLI `ace decision:add`.',
     status: 'Status',
     mode: 'Mode',
     severity: 'Severity',
@@ -426,337 +440,93 @@ function getReportCopy(rawLocale) {
   return REPORT_LOCALES[locale] || REPORT_LOCALES['en-US'];
 }
 
+const DYNAMIC_TEXT_EXACT_EN = new Map([
+  ['Sem workflows CI detectados no escopo.', 'No CI workflows detected in scope.'],
+  ['Projeto sem package.json no root.', 'Project has no package.json at root.'],
+  ['Sem composer.json/composer.lock no root.', 'No composer.json/composer.lock at root.'],
+  ['composer audit sem vulnerabilidades reportadas.', 'composer audit reported no vulnerabilities.'],
+  ['npm audit sem vulnerabilidades reportadas.', 'npm audit reported no vulnerabilities.'],
+  ['Controle manual: requer evidência fora da análise estática local.', 'Manual control: requires evidence outside local static analysis.'],
+  ['Registrar evidência em docs/CI e formalizar decisão no ACE para rastreabilidade.', 'Record evidence in docs/CI and formalize the decision in ACE for traceability.'],
+  ['Sem menção a webhooks no escopo atual.', 'No webhook mentions in the current scope.'],
+  ['Sem sinais de N+1 em loops no escopo atual.', 'No N+1 signals in loops within the current scope.'],
+  ['Sem sinais suficientes de policies/gates para ações não-model.', 'Insufficient policy/gate signals for non-model actions.'],
+  ['Nenhum SQL raw detectado.', 'No raw SQL detected.'],
+  ['Nenhum SQL raw dinâmico detectado.', 'No dynamic raw SQL detected.'],
+  ['Não foram detectados usos de $request->all().', 'No `$request->all()` usage detected.'],
+  ['Sem controllers no escopo atual para medir adoção.', 'No controllers in the current scope to measure adoption.'],
+  ['Sem superfície crítica identificada no escopo atual.', 'No critical surface identified in the current scope.'],
+  ['Sem models detectados no escopo atual.', 'No models detected in the current scope.'],
+  ['Nenhum sink perigoso detectado no escopo.', 'No dangerous sink detected in scope.'],
+  ['Sem bypass explícito de CSRF detectado em rotas state-changing.', 'No explicit CSRF bypass detected in state-changing routes.'],
+  ['Versão não identificada no lockfile.', 'Version not identified in lockfile.'],
+  ['Configuração CORS explícita', 'Explicit CORS configuration'],
+]);
+
+const DYNAMIC_TEXT_PATTERNS_EN = [
+  [/composer audit reportou (\d+) vulnerabilidade\(s\):/gi, 'composer audit reported $1 vulnerability(ies):'],
+  [/npm audit reportou (\d+) vulnerabilidade\(s\):/gi, 'npm audit reported $1 vulnerability(ies):'],
+  [/audit não pôde ser avaliado/gi, 'audit could not be evaluated'],
+  [/falha ao executar audit:/gi, 'failed to execute audit:'],
+  [/timeout ao executar audit\./gi, 'timeout while running audit.'],
+  [/audit retornou status (\d+)\./gi, 'audit returned status $1.'],
+  [/\(cache\)/gi, '(cache)'],
+  [/Adoção atual de FormRequest\/DTO:\s*(\d+)%\./gi, 'Current FormRequest/DTO adoption: $1%.'],
+  [/Cobertura model↔policy:\s*(\d+)\/(\d+)\./gi, 'Model↔policy coverage: $1/$2.'],
+  [/Sinais de upload:\s*(\d+);\s*validações explícitas:\s*(\d+)\./gi, 'Upload signals: $1; explicit validations: $2.'],
+  [/Sinais de autorização server-side por superfície:\s*(\d+)\/(\d+)\./gi, 'Server-side authorization signals per surface: $1/$2.'],
+  [/(\d+)\s+ocorrência\(s\)\s+de\s+\$request->all\(\)\s+detectada\(s\)\./gi, '$1 occurrence(s) of `$request->all()` detected.'],
+  [/(\d+)\s+ocorrência\(s\)\s+de\s+consulta potencialmente não limitada detectada\(s\)\./gi, '$1 potentially unbounded query occurrence(s) detected.'],
+  [/(\d+)\s+arquivo\(s\)\s+com sinal de acesso a relação em loop sem eager loading\./gi, '$1 file(s) with relation-in-loop access without eager loading.'],
+  [/(\d+)\s+arquivo\(s\)\s+com escrita crítica sem sinal de `DB::transaction\(\)`\./gi, '$1 file(s) with critical writes without `DB::transaction()` signal.'],
+  [/(\d+)\s+sink\(s\)\s+perigoso\(s\)\s+detectado\(s\)\./gi, '$1 dangerous sink(s) detected.'],
+  [/(\d+)\s+arquivo\(s\)\s+de rota com escrita sem auth detectada\./gi, '$1 route file(s) with state-changing writes without auth detected.'],
+  [/(\d+)\s+arquivo\(s\)\s+de rota com escrita sem throttle detectado\(s\)\./gi, '$1 route file(s) with state-changing writes without throttle detected.'],
+  [/(\d+)\s+arquivo\(s\)\s+de rotas com bypass explícito de CSRF\./gi, '$1 route file(s) with explicit CSRF bypass.'],
+  [/Sem Gate::define explícito; políticas existentes cobrem parte da autorização\./gi, 'No explicit Gate::define; existing policies cover part of authorization.'],
+  [/(\d+)\s+Gate::define\/resource detectado\(s\)\./gi, '$1 Gate::define/resource detected.'],
+  [/(\d+)\/(\d+)\s+chamada\(s\)\s+raw SQL com sinais dinâmicos exigindo revisão manual\./gi, '$1/$2 raw SQL call(s) with dynamic signals requiring manual review.'],
+  [/(\d+)\s+ponto\(s\)\s+de SQL raw com variável dinâmica detectado\(s\)\./gi, '$1 raw SQL point(s) with dynamic variables detected.'],
+  [/Sem sinal de writes críticos sem transação no escopo\./gi, 'No signal of critical writes without transactions in scope.'],
+  [/Nenhuma consulta `->get\(\)` sem limite explícito detectada\./gi, 'No `->get()` queries without explicit limits detected.'],
+  [/Não foram detectadas rotas de escrita sem throttling\./gi, 'No state-changing routes without throttling were detected.'],
+  [/Nenhum arquivo routes\/\*\.php analisado neste ciclo\./gi, 'No routes/*.php files analyzed in this cycle.'],
+  [/Em produção, garantir APP_DEBUG=false e tratamento seguro de exceções\./gi, 'In production, ensure APP_DEBUG=false and safe exception handling.'],
+  [/Prefira \$request->validated\(\) \(FormRequest\) ou DTO com contrato explícito\./gi, 'Prefer `$request->validated()` (FormRequest) or DTO with explicit contract.'],
+  [/Padronize validação de entrada para reduzir payload poisoning e inconsistência\./gi, 'Standardize input validation to reduce payload poisoning and inconsistency.'],
+  [/Padronize validação de entrada para reduzir payload poisoning e inconsistência\./gi, 'Standardize input validation to reduce payload poisoning and inconsistency.'],
+  [/Configure CORS por origem\/método\/header estritamente necessários\./gi, 'Configure CORS with strictly required origin/method/header.'],
+  [/Aplique whitelist de MIME\/extensão\/tamanho e validação server-side\./gi, 'Apply MIME/extension/size whitelisting and server-side validation.'],
+  [/Implemente assinatura \+ janela anti-replay \(timestamp\/nonce\)\./gi, 'Implement signature + anti-replay window (timestamp/nonce).'],
+  [/Adicionar gate de composer audit para bloquear advisories High\/Critical\./gi, 'Add composer audit gate to block High/Critical advisories.'],
+  [/Adicionar npm audit \(runtime\) como gate em PR\/release\./gi, 'Add npm audit (runtime) as a PR/release gate.'],
+  [/Adicionar Semgrep\/CodeQL\/Larastan como gate de segurança em PR\./gi, 'Add Semgrep/CodeQL/Larastan as a PR security gate.'],
+  [/Adicionar DAST em staging para endpoints e painéis críticos\./gi, 'Add DAST in staging for critical endpoints and panels.'],
+  [/Sem sinal de secret scanning no CI detectado\./gi, 'No secret scanning signal detected in CI.'],
+  [/Sem sinal de SAST detectado no CI\./gi, 'No SAST signal detected in CI.'],
+  [/Sem sinal de DAST detectado no CI\./gi, 'No DAST signal detected in CI.'],
+  [/Sinal de composer audit no CI detectado\./gi, 'Composer audit signal detected in CI.'],
+  [/Sinal de npm audit no CI detectado\./gi, 'NPM audit signal detected in CI.'],
+  [/Sinal de secret scanning no CI detectado\./gi, 'Secret scanning signal detected in CI.'],
+  [/Sinal de SAST detectado no CI\./gi, 'SAST signal detected in CI.'],
+  [/Sinal de DAST detectado no CI\./gi, 'DAST signal detected in CI.'],
+];
+
 function translateDynamicText(value, localeCode) {
   const input = String(value || '');
   if (localeCode !== 'en-US' || !input) {
     return input;
   }
 
-  const replacements = [
-    [/Sem workflows CI detectados no escopo\./gi, 'No CI workflows detected in scope.'],
-    [/Projeto sem package\.json no root\./gi, 'Project has no package.json at root.'],
-    [/Sem composer\.json\/composer\.lock no root\./gi, 'No composer.json/composer.lock at root.'],
-    [/composer audit sem vulnerabilidades reportadas\./gi, 'composer audit reported no vulnerabilities.'],
-    [/npm audit sem vulnerabilidades reportadas\./gi, 'npm audit reported no vulnerabilities.'],
-    [/composer audit reportou ([0-9]+) vulnerabilidade\(s\):/gi, 'composer audit reported $1 vulnerabilit(ies):'],
-    [/npm audit reportou ([0-9]+) vulnerabilidade\(s\):/gi, 'npm audit reported $1 vulnerabilit(ies):'],
-    [/audit não pôde ser avaliado/gi, 'audit could not be evaluated'],
-    [/falha ao executar audit:/gi, 'failed to execute audit:'],
-    [/timeout ao executar audit\./gi, 'timeout while running audit.'],
-    [/audit retornou status ([0-9]+)\./gi, 'audit returned status $1.'],
-    [/\(cache\)/gi, '(cache)'],
-    [/Controle manual: requer evidência fora da análise estática local\./gi, 'Manual control: requires evidence outside local static analysis.'],
-    [/Registrar evidência em docs\/CI e formalizar decisão no ACE para rastreabilidade\./gi, 'Record evidence in docs/CI and formalize the decision in ACE for traceability.'],
-    [/Em produção, garantir APP_DEBUG=false e tratamento seguro de exceções\./gi, 'In production, ensure APP_DEBUG=false and safe exception handling.'],
-    [/Sem menção a webhooks no escopo atual\./gi, 'No webhook mentions in the current scope.'],
-    [/Sem sinais de N\+1 em loops no escopo atual\./gi, 'No N+1 signals in loops within the current scope.'],
-    [/Sem sinal de writes críticos sem transação no escopo\./gi, 'No signal of critical writes without transactions in scope.'],
-    [/Sem bypass explícito de CSRF detectado em rotas state-changing\./gi, 'No explicit CSRF bypass detected in state-changing routes.'],
-    [/Sem sinais suficientes de policies\/gates para ações não-model\./gi, 'Insufficient policy/gate signals for non-model actions.'],
-    [/Nenhum SQL raw dinâmico detectado\./gi, 'No dynamic raw SQL detected.'],
-    [/Nenhum SQL raw detectado\./gi, 'No raw SQL detected.'],
-    [/Nenhuma consulta `->get\(\)` sem limite explícito detectada\./gi, 'No `->get()` queries without explicit limit detected.'],
-    [/Não foram detectados usos de \$request->all\(\)\./gi, 'No `$request->all()` usage detected.'],
-    [/Não foram detectadas rotas de escrita sem throttling\./gi, 'No state-changing routes without throttling were detected.'],
-    [/Nenhum arquivo routes\/\*\.php analisado neste ciclo\./gi, 'No routes/*.php files analyzed in this cycle.'],
-    [/Sem controllers no escopo atual para medir adoção\./gi, 'No controllers in the current scope to measure adoption.'],
-    [/Sem superfície crítica identificada no escopo atual\./gi, 'No critical surface identified in the current scope.'],
-    [/Sem models detectados no escopo atual\./gi, 'No models detected in the current scope.'],
-    [/Nenhum sink perigoso detectado no escopo\./gi, 'No dangerous sink detected in scope.'],
-    [/Versão não identificada no lockfile\./gi, 'Version not identified in lockfile.'],
-    [/não encontrado no lock\/composer\./gi, 'not found in lock/composer.'],
-    [/Adoção consistente de FormRequest\/DTO/gi, 'Consistent FormRequest/DTO adoption'],
-    [/Bloquear raw SQL dinâmico sem binding/gi, 'Block dynamic raw SQL without bindings'],
-    [/Revisar pontos com SQL raw/gi, 'Review raw SQL points'],
-    [/Evitar consultas `->get\(\)` sem limite\/paginação/gi, 'Avoid `->get()` queries without limit/pagination'],
-    [/Revisar risco de N\+1 em acesso a relações/gi, 'Review N+1 risk in relation access'],
-    [/Operações críticas com transação explícita/gi, 'Critical operations with explicit transactions'],
-    [/Autorização server-side em superfícies críticas/gi, 'Server-side authorization on critical surfaces'],
-    [/Cobertura Model ↔ Policy consistente/gi, 'Consistent Model ↔ Policy coverage'],
-    [/Cobertura model↔policy:/gi, 'Model↔policy coverage:'],
-    [/Cobertura de Gates para ações não-model/gi, 'Gate coverage for non-model actions'],
-    [/Rotas de escrita com autenticação/gi, 'State-changing routes with authentication'],
-    [/Revisar bypass de CSRF em rotas de escrita/gi, 'Review CSRF bypass in state-changing routes'],
-    [/APP_DEBUG seguro para produção/gi, 'APP_DEBUG safe for production'],
-    [/Livewire com propriedades públicas protegidas/gi, 'Livewire with protected public properties'],
-    [/Filament Pages com autorização\/visibilidade explícita/gi, 'Filament Pages with explicit authorization/visibility'],
-    [/Filament Widgets com autorização\/visibilidade explícita/gi, 'Filament Widgets with explicit authorization/visibility'],
-    [/Upload com validação e restrições explícitas/gi, 'Upload with explicit validation and constraints'],
-    [/Webhook com validação de assinatura/gi, 'Webhook with signature validation'],
-    [/DAST em staging\/rotas críticas/gi, 'DAST in staging/critical routes'],
-    [/Threat modeling de fluxos críticos/gi, 'Threat modeling for critical flows'],
-    [/Revisão periódica de isolamento multi-tenant/gi, 'Periodic review of multi-tenant isolation'],
-    [/Política de rotação de segredos ativa/gi, 'Active secret rotation policy'],
-    [/Pentest\/review de segurança por release/gi, 'Security pentest/review per release'],
-    [/Padronizar Controller -> Service/gi, 'Standardize Controller -> Service'],
-    [/Aumentar uso de FormRequest\/DTO em escrita/gi, 'Increase FormRequest/DTO usage in writes'],
-    [/Formalizar 1-2 decisões arquiteturais do padrão dominante/gi, 'Formalize 1-2 architectural decisions from the dominant pattern'],
-    [/Evitar `Model::all\(\)` em serviços e comandos/gi, 'Avoid `Model::all()` in services and commands'],
-    [/Revisar raw SQL com variáveis dinâmicas/gi, 'Review raw SQL with dynamic variables'],
-    [/Reduzir consultas `->get\(\)` sem paginação\/limite/gi, 'Reduce `->get()` queries without pagination/limit'],
-    [/Revisar potenciais N\+1 em loops com relações/gi, 'Review potential N+1 in loops with relations'],
-    [/Aplicar unicidade\/idempotência em jobs críticos/gi, 'Apply uniqueness/idempotency in critical jobs'],
-    [/Remover acesso direto a Model em middleware/gi, 'Remove direct Model access from middleware'],
-    [/Evitar acesso direto a Model em Helpers/gi, 'Avoid direct Model access in Helpers'],
-    [/Tornar Value Objects imutáveis/gi, 'Make Value Objects immutable'],
-    [/Avaliar queue para Mailables de maior custo/gi, 'Evaluate queue usage for higher-cost Mailables'],
-    [/Reduzir exposição de dados sensíveis em Mail\/Logs/gi, 'Reduce sensitive data exposure in Mail/Logs'],
-    [/Padronizar contrato de Scopes com apply\(\)/gi, 'Standardize Scope contract with apply()'],
-    [/Reforçar autenticação\/autorização em Websocket/gi, 'Strengthen authentication/authorization in Websocket'],
-    [/Aplicar guardas de relação em API Resources/gi, 'Apply relation guards in API Resources'],
-    [/Reduzir acoplamento e escopo de Traits/gi, 'Reduce coupling and scope of Traits'],
-    [/Completar bindings de Contracts no container/gi, 'Complete Contract bindings in the container'],
-    [/Enxugar Providers e reforçar bindings explícitos/gi, 'Slim down Providers and reinforce explicit bindings'],
-    [/Reduzir lógica de domínio dentro de Events\/Observers/gi, 'Reduce domain logic inside Events/Observers'],
-    [/Avaliar queue para Notifications de maior impacto/gi, 'Evaluate queue usage for higher-impact Notifications'],
-    [/Revisar payload sensível em Notifications/gi, 'Review sensitive payload in Notifications'],
-    [/Remover `\$request->all\(\)` em pontos críticos/gi, 'Remove `$request->all()` in critical points'],
-    [/Fechar lacunas de testes em camadas de negócio/gi, 'Close test gaps in business layers'],
-    [/Reduzir métodos longos em controllers/gi, 'Reduce long methods in controllers'],
-    [/Job enfileirado sem `\$tries` explícito/gi, 'Queued job without explicit `$tries`'],
-    [/Job enfileirado sem `\$timeout` explícito/gi, 'Queued job without explicit `$timeout`'],
-    [/Job sem handler `failed\(\)` explícito/gi, 'Job without explicit `failed()` handler'],
-    [/Defina `\$tries` de forma explícita no Job\./gi, 'Define `$tries` explicitly in the Job.'],
-    [/Defina `\$timeout` coerente com o SLA da operação\./gi, 'Define `$timeout` aligned with the operation SLA.'],
-    [/Considere implementar `failed\(Throwable \$e\)` para fallback\/alerta\./gi, 'Consider implementing `failed(Throwable $e)` for fallback/alerting.'],
-    [/sem teste dedicado/gi, 'without dedicated test'],
-    [/Adicionar teste unitário para/gi, 'Add unit test for'],
-    [/Filament Page sem sinal explícito de controle de acesso/gi, 'Filament Page without explicit access control signal'],
-    [/Trait extenso \(([0-9]+) linhas \/ ([0-9]+) métodos\)/gi, 'Large trait ($1 lines / $2 methods)'],
-    [/Trait com acoplamento alto detectado \(([0-9]+) imports de App\\\\\*\)/gi, 'High-coupling trait detected ($1 App\\\\* imports)'],
-    [/Trait com acesso direto a Model detectado/gi, 'Trait with direct Model access detected'],
-    [/Contrato ([A-Za-z0-9_]+) sem bind\/singleton\/scoped detectado/gi, 'Contract $1 without bind/singleton/scoped detected'],
-    [/Provider com ([0-9]+) linhas/gi, 'Provider with $1 lines'],
-    [/Provider importa Contracts sem sinal de binding no container/gi, 'Provider imports Contracts without container binding signal'],
-    [/Event com ([0-9]+) linhas/gi, 'Event with $1 lines'],
-    [/Event com acesso direto a Model detectado/gi, 'Event with direct Model access detected'],
-    [/Event com acesso direto a DB detectado/gi, 'Event with direct DB access detected'],
-    [/Observer com ([0-9]+) linhas/gi, 'Observer with $1 lines'],
-    [/Observer com acesso direto a Model detectado/gi, 'Observer with direct Model access detected'],
-    [/Helper com ([0-9]+) linhas/gi, 'Helper with $1 lines'],
-    [/Helper com acesso direto a Model detectado/gi, 'Helper with direct Model access detected'],
-    [/Validator com ([0-9]+) linhas/gi, 'Validator with $1 lines'],
-    [/Validator sem método de entrada esperado detectado/gi, 'Validator without expected entrypoint method detected'],
-    [/Value Object com sinais de mutabilidade detectado/gi, 'Value Object with mutability signals detected'],
-    [/Mailable sem `ShouldQueue` detectado/gi, 'Mailable without `ShouldQueue` detected'],
-    [/Mailable com possível payload sensível detectado/gi, 'Mailable with possible sensitive payload detected'],
-    [/Possível log de dado sensível detectado/gi, 'Potential sensitive data log detected'],
-    [/Form component com ([0-9]+) linhas/gi, 'Form component with $1 lines'],
-    [/Scope sem método `apply\(\)` detectado/gi, 'Scope without `apply()` method detected'],
-    [/Componente websocket sem sinal claro de autenticação\/autorização/gi, 'Websocket component without clear authentication/authorization signal'],
-    [/Notification sem `ShouldQueue` detectada/gi, 'Notification without `ShouldQueue` detected'],
-    [/Notification com possível payload sensível detectado/gi, 'Notification with possible sensitive payload detected'],
-    [/([0-9]+) acesso\(s\) de relação em Resource sem guardas explícitas/gi, '$1 relation access(es) in Resource without explicit guards'],
-    [/Use `whenLoaded\(\)`\/`whenCounted\(\)` \(ou `relationLoaded`\) para relações opcionais em Resources\./gi, 'Use `whenLoaded()`/`whenCounted()` (or `relationLoaded`) for optional relations in Resources.'],
-    [/Filament page extensa/gi, 'Large Filament page'],
-    [/Extrair lógica para Services\/Actions e reduzir responsabilidade da Page\./gi, 'Extract logic to Services/Actions and reduce Page responsibility.'],
-    [/Extrair passos para Services\/Actions reutilizáveis\./gi, 'Extract steps into reusable Services/Actions.'],
-    [/consulta\(s\) com `->get\(\)` sem limite\/paginação detectada\(s\)/gi, 'query(ies) with `->get()` without limit/pagination detected'],
-    [/Prefira paginação \(`paginate\/cursorPaginate`\) ou limite explícito para consultas potencialmente grandes\./gi, 'Prefer pagination (`paginate/cursorPaginate`) or explicit limits for potentially large queries.'],
-    [/ponto\(s\) de SQL raw com variável dinâmica detectado\(s\)/gi, 'raw SQL point(s) with dynamic variables detected'],
-    [/Substitua por bindings parametrizados ou Query Builder com whitelist\./gi, 'Replace with parameterized bindings or Query Builder with whitelist.'],
-    [/Sinais de upload:/gi, 'Upload signals:'],
-    [/validações explícitas/gi, 'explicit validations'],
-    [/Aplique whitelist de MIME\/extensão\/tamanho e validation server-side\./gi, 'Apply MIME/extension/size whitelisting and server-side validation.'],
-    [/Garanta policy para models críticos e registre mapeamento explícito quando fugir de convenção\./gi, 'Ensure policies for critical models and register explicit mapping when deviating from convention.'],
-    [/Garanta authorize\/policies em ações críticas/gi, 'Ensure authorize/policies on critical actions'],
-    [/arquivo\(s\) com escrita crítica sem sinal de `DB::transaction\(\)`\./gi, 'file(s) with critical writes without `DB::transaction()` signal.'],
-    [/Encapsular fluxos financeiros\/criticos em transação e reforçar idempotência\./gi, 'Wrap financial/critical flows in transactions and reinforce idempotency.'],
-    [/ocorrência\(s\) de \$request->all\(\) detectada\(s\)\./gi, 'occurrence(s) of `$request->all()` detected.'],
-    [/Prefira \$request->validated\(\) \(FormRequest\) ou DTO com contrato explícito\./gi, 'Prefer `$request->validated()` (FormRequest) or DTO with explicit contract.'],
-    [/Implemente `canView\(\)` e\/ou guardas server-side em widgets que exibem dados sensíveis\./gi, 'Implement `canView()` and/or server-side guards in widgets that expose sensitive data.'],
-    [/Use #\[Locked\] para campos imutáveis e valide\/autorize todas mutações\./gi, 'Use #[Locked] for immutable fields and validate/authorize all mutations.'],
-    [/Aplicar with\/load onde houver iteração de entidades com relações\./gi, 'Apply with/load where iterating entities with relations.'],
-    [/ocorrência\(s\) de consulta potencialmente não limitada detectada\(s\)\./gi, 'occurrence(s) of potentially unbounded queries detected.'],
-    [/Sem Gate::define explícito; políticas existentes cobrem parte da authorization\./gi, 'No explicit Gate::define; existing policies cover part of authorization.'],
-    [/Para ações fora de CRUD de model, prefira Gate::define\/resource e checagem explícita no ponto de uso\./gi, 'For actions outside model CRUD, prefer Gate::define/resource and explicit checks at use sites.'],
-    [/Adoção atual de FormRequest\/DTO:/gi, 'Current FormRequest/DTO adoption:'],
-    [/Padronize validation de entrada para reduzir payload poisoning e inconsistência\./gi, 'Standardize input validation to reduce payload poisoning and inconsistency.'],
-    [/Padronize `canAccess\(\)`\/authorize\/policy para cada Page sensível exposta no painel\./gi, 'Standardize `canAccess()`/authorize/policy for each sensitive Page exposed in the panel.'],
-    [/Proteja APIs sensíveis com `auth:sanctum` e confirme `HasApiTokens` nos modelos emissores de token\./gi, 'Protect sensitive APIs with `auth:sanctum` and confirm `HasApiTokens` in token-issuing models.'],
-    [/Confirme compensações fortes ao usar bypass de CSRF \(auth robusta, assinatura, nonce\)\./gi, 'Confirm strong compensating controls when using CSRF bypass (robust auth, signature, nonce).'],
-    [/Configuração CORS explícita/gi, 'Explicit CORS configuration'],
-    [/Configure CORS por origem\/método\/header estritamente necessários\./gi, 'Configure CORS with strictly required origin/method/header.'],
-    [/Mover preparação of dados for camada of serviço e simplificar o Widget\./gi, 'Move data preparation to the service layer and simplify the Widget.'],
-    [/Use paginação\/filtros e delegue consulta for Service\/UseCase\./gi, 'Use pagination/filters and delegate query logic to Service/UseCase.'],
-    [/O ACE já consegue inferir padrões\. Converter decisões recorrentes in decisões persistentes reduz oscilactions da LLM entre features\./gi, 'ACE already infers patterns. Converting recurring decisions into persistent decisions reduces LLM oscillation between features.'],
-    [/Paginação e filtros in the Service\/UseCase reduzem carga e risco of gargalos in listas crescentes\./gi, 'Pagination and filters in Service/UseCase reduce load and bottleneck risk in growing lists.'],
-    [/Foram detectadas consultas with `->get\(\)` without limite explicit\. in listas grandes isso costuma degradar memória e tempo of resposta\./gi, 'Queries with `->get()` without explicit limits were detected. In large lists, this usually degrades memory and response time.'],
-    [/Jobs with lacunas of resiliência detectados \(tries ausente: ([0-9]+), timeout ausente: ([0-9]+)\)\./gi, 'Jobs with resilience gaps detected (missing tries: $1, missing timeout: $2).'],
-    [/Foram detectadas leituras totais outside of controllers\. in jobs\/commands\/services isso costuma escalar mal in memória e tempo\./gi, 'Total reads outside controllers were detected. In jobs/commands/services this usually scales poorly in memory and time.'],
-    [/Há uso of DB::raw\/selectRaw\/whereRaw with interpolação dynamic\. Priorize bindings e Query Builder for reduzir risco\./gi, 'DB::raw/selectRaw/whereRaw usage with dynamic interpolation was detected. Prioritize bindings and Query Builder to reduce risk.'],
-    [/Há signals of acesso a relactions dentro of loop without eager loading claro\. Isso pode multiplicar queries in production\./gi, 'There are signals of relation access inside loops without clear eager loading. This can multiply queries in production.'],
-    [/flows with palavras-chave financeiras e escrita without transaction foram detectados\. Isso aumenta risco of inconsistency in concorrência\/falhas parciais\./gi, 'Flows with financial keywords and writes without transactions were detected. This increases inconsistency risk under concurrency/partial failures.'],
-    [/Foram detectados jobs with contexto financial\/estado critical without sinal of unicidade\. Isso eleva risco of execução duplicada\./gi, 'Jobs with financial/critical context without uniqueness signals were detected. This increases duplicated execution risk.'],
-    [/Há middleware with consulta direta a Model, o que aumenta acoplamento e dificulta evolução do pipeline HTTP\./gi, 'There is middleware with direct Model access, which increases coupling and hinders HTTP pipeline evolution.'],
-    [/Foram detectados ([0-9]+) acesso\(s\) de relação sem `whenLoaded\/relationLoaded` em Resources\. Isso pode induzir lazy loading e N\+1\./gi, '$1 relation access(es) without `whenLoaded/relationLoaded` were detected in Resources. This can induce lazy loading and N+1.'],
-    [/Há sinais de traits grandes\/acoplados e\/ou com acesso direto a Model\. Centralize regra de negócio em Services\/UseCases e mantenha traits focados em composição leve\./gi, 'There are signals of large/coupled traits and/or direct Model access. Centralize business logic in Services/UseCases and keep traits focused on lightweight composition.'],
-    [/Foram detectados ([0-9]+) contratos sem bind\/singleton\/scoped explícito em providers\./gi, '$1 contracts without explicit bind/singleton/scoped were detected in providers.'],
-    [/Há helpers com acesso direto a Model\. Isso aumenta acoplamento global e dificulta teste\/manutenção de fluxo de negócio\./gi, 'There are helpers with direct Model access. This increases global coupling and makes business-flow testing/maintenance harder.'],
-    [/Foram detectados Value Objects com sinais de mutabilidade\. Padronize `readonly`\/construtor\/factory para previsibilidade e segurança de estado\./gi, 'Value Objects with mutability signals were detected. Standardize `readonly`/constructor/factory for state predictability and safety.'],
-    [/Mailables sem ShouldQueue foram detectados\. Em cenários de volume, envio síncrono aumenta latência e risco de timeout\./gi, 'Mailables without ShouldQueue were detected. In high-volume scenarios, synchronous delivery increases latency and timeout risk.'],
-    [/Há sinais de dados sensíveis em mailables\/logging\. Minimize payload, aplique masking e evite persistir secrets\/tokens em canais observáveis\./gi, 'There are signs of sensitive data in mailables/logging. Minimize payload, apply masking, and avoid persisting secrets/tokens in observable channels.'],
-    [/Foram detectados arquivos de scope sem método apply\(\) explícito\. Padronizar o contrato melhora previsibilidade de filtros globais\/locais\./gi, 'Scope files without explicit apply() were detected. Standardizing the contract improves predictability of global/local filters.'],
-    [/Há componentes websocket sem sinais claros de authz\/authn\. Valide handshake, escopo de canal e autorização server-side\./gi, 'Websocket components without clear authz/authn signals were detected. Validate handshake, channel scope, and server-side authorization.'],
-    [/Há sinais de providers extensos e\/ou imports de contracts sem binding explícito\. Consolidar DI e reduzir responsabilidade dos providers melhora previsibilidade do container\./gi, 'There are signals of large providers and/or contract imports without explicit binding. Consolidating DI and reducing provider responsibility improves container predictability.'],
-    [/Foram detectados eventos\/observers com sinais de acesso a Model\/DB ou excesso de lógica\. Mantenha events como contrato de dados e observers com orquestração mínima\./gi, 'Events/observers were detected with Model/DB access signals or excessive logic. Keep events as data contracts and observers with minimal orchestration.'],
-    [/Notifications sem ShouldQueue foram detectadas\. Em fluxos de alto volume\/custo, o envio síncrono aumenta latência e risco de timeout\./gi, 'Notifications without ShouldQueue were detected. In high-volume/cost flows, synchronous delivery increases latency and timeout risk.'],
-    [/Há sinais de payload sensível \(token\/secret\/password\/code\) em notifications\. Reduza exposição e use tokens curtos, expiração e masking\./gi, 'There are signals of sensitive payload (token/secret/password/code) in notifications. Reduce exposure and use short-lived tokens, expiration, and masking.'],
-    [/Há serviços\/controllers without testes detectados\. Priorize hotspots with mais alteractions e maior impacto\./gi, 'Services/controllers without tests were detected. Prioritize hotspots with more changes and higher impact.'],
-    [/Quebrar comandos larges in steps reutilizáveis/gi, 'Break large commands into reusable steps'],
-    [/Commands longos dificultam manutenção operationale\. Extrair passos for services\/actions melhora testabilidade e reuso\./gi, 'Long commands hurt operational maintainability. Extracting steps to services/actions improves testability and reuse.'],
-    [/Resources grandes tendem a misturar regra of negócio with configuration of UI\. Mover regra for Services\/Policies melhora evolução\./gi, 'Large resources tend to mix business rules with UI configuration. Moving rules to Services/Policies improves evolution.'],
-    [/Priorizar resolução of violactions of alto impacto/gi, 'Prioritize resolving high-impact violations'],
-    [/Existem múltiplas violactions of severidade alta\. consider uma sprint curta of estabilização arquitetural\./gi, 'There are multiple high-severity violations. Consider a short architectural stabilization sprint.'],
-    [/Mover preparação of dados for camada of serviço e simplificar o Widget\./gi, 'Move data preparation to the service layer and simplify the Widget.'],
-    [/Use paginação\/filtros e delegue consulta for Service\/UseCase\./gi, 'Use pagination/filters and delegate query logic to Service/UseCase.'],
-    [/O ACE já consegue inferir padrões\. Converter decisões recorrentes in decisões persistentes reduz oscilactions da LLM entre features\./gi, 'ACE already infers patterns. Converting recurring decisions into persistent decisions reduces LLM oscillation between features.'],
-    [/Paginação e filtros in the Service\/UseCase reduzem carga e risco of gargalos in listas crescentes\./gi, 'Pagination and filters in Service/UseCase reduce load and bottleneck risk in growing lists.'],
-    [/Foram detectadas consultas with `-&gt;get\(\)` without limite explicit\. in listas grandes isso costuma degradar memória e tempo of resposta\./gi, 'Queries with `->get()` without explicit limits were detected. In large lists, this usually degrades memory and response time.'],
-    [/Jobs with lacunas of resiliência detectados \(tries ausente: ([0-9]+), timeout ausente: ([0-9]+)\)\./gi, 'Jobs with resilience gaps detected (missing tries: $1, missing timeout: $2).'],
-    [/Foram detectadas leituras totais outside of controllers\. in jobs\/commands\/services isso costuma escalar mal in memória e tempo\./gi, 'Total reads outside controllers were detected. In jobs/commands/services this usually scales poorly in memory and time.'],
-    [/Há uso of DB::raw\/selectRaw\/whereRaw with interpolação dynamic\. Priorize bindings e Query Builder for reduzir risco\./gi, 'DB::raw/selectRaw/whereRaw usage with dynamic interpolation was detected. Prioritize bindings and Query Builder to reduce risk.'],
-    [/Há signals of acesso a relactions dentro of loop without eager loading claro\. Isso pode multiplicar queries in production\./gi, 'There are signals of relation access inside loops without clear eager loading. This can multiply queries in production.'],
-    [/flows with palavras-chave financeiras e escrita without transaction foram detectados\. Isso aumenta risco of inconsistency in concorrência\/falhas parciais\./gi, 'Flows with financial keywords and writes without transactions were detected. This increases inconsistency risk under concurrency/partial failures.'],
-    [/Foram detectados jobs with contexto financial\/estado critical without sinal of unicidade\. Isso eleva risco of execução duplicada\./gi, 'Jobs with financial/critical context without uniqueness signals were detected. This increases duplicated execution risk.'],
-    [/Há middleware with consulta direta a Model, o que aumenta acoplamento e dificulta evolução do pipeline HTTP\./gi, 'There is middleware with direct Model access, which increases coupling and hinders HTTP pipeline evolution.'],
-    [/Há serviços\/controllers without testes detectados\. Priorize hotspots with mais alteractions e maior impacto\./gi, 'Services/controllers without tests were detected. Prioritize hotspots with more changes and higher impact.'],
-    [/Quebrar comandos larges in steps reutilizáveis/gi, 'Break large commands into reusable steps'],
-    [/Commands longos dificultam manutenção operationale\. Extrair passos for services\/actions melhora testabilidade e reuso\./gi, 'Long commands hurt operational maintainability. Extracting steps to services/actions improves testability and reuse.'],
-    [/Resources grandes tendem a misturar regra of negócio with configuration of UI\. Mover regra for Services\/Policies melhora evolução\./gi, 'Large resources tend to mix business rules with UI configuration. Moving rules to Services/Policies improves evolution.'],
-    [/Priorizar resolução of violactions of alto impacto/gi, 'Prioritize resolving high-impact violations'],
-    [/Existem múltiplas violactions of severidade alta\. consider uma sprint curta of estabilização arquitetural\./gi, 'There are multiple high-severity violations. Consider a short architectural stabilization sprint.'],
-    [/O ACE já consegue inferir padrões\. Converter decisões recorrentes in decisões persistentes reduz oscilactions da LLM entre features\./gi, 'ACE already infers patterns. Converting recurring decisions into persistent decisions reduces LLM oscillation between features.'],
-    [/Paginação e filtros in the Service\/UseCase reduzem carga e risco of gargalos in listas crescentes\./gi, 'Pagination and filters in Service/UseCase reduce load and bottleneck risk in growing lists.'],
-    [/Foram detectadas consultas with `->get\(\)` without limite explicit\. in listas grandes isso costuma degradar memória e tempo of resposta\./gi, 'Queries with `->get()` without explicit limits were detected. In large lists, this usually degrades memory and response time.'],
-    [/Foram detectadas leituras totais outside of controllers\. in jobs\/commands\/services isso costuma escalar mal in memória e tempo\./gi, 'Total reads outside controllers were detected. In jobs/commands/services this usually scales poorly in memory and time.'],
-    [/Há uso of DB::raw\/selectRaw\/whereRaw with interpolação dynamic\. Priorize bindings e Query Builder for reduzir risco\./gi, 'DB::raw/selectRaw/whereRaw usage with dynamic interpolation was detected. Prioritize bindings and Query Builder to reduce risk.'],
-    [/Há signals of acesso a relactions dentro of loop without eager loading claro\. Isso pode multiplicar queries in production\./gi, 'There are signals of relation access inside loops without clear eager loading. This can multiply queries in production.'],
-    [/flows with palavras-chave financeiras e escrita without transaction foram detectados\. Isso aumenta risco of inconsistency in concorrência\/falhas parciais\./gi, 'Flows with financial keywords and writes without transactions were detected. This increases inconsistency risk under concurrency/partial failures.'],
-    [/Jobs with lacunas of resiliência detectados \(tries ausente: ([0-9]+), timeout ausente: ([0-9]+)\)\./gi, 'Jobs with resilience gaps detected (missing tries: $1, missing timeout: $2).'],
-    [/Foram detectados jobs with contexto financial\/estado critical without sinal of unicidade\. Isso eleva risco of execução duplicada\./gi, 'Jobs with financial/critical context without uniqueness signals were detected. This increases duplicated execution risk.'],
-    [/Há middleware with consulta direta a Model, o que aumenta acoplamento e dificulta evolução do pipeline HTTP\./gi, 'There is middleware with direct Model access, which increases coupling and hinders HTTP pipeline evolution.'],
-    [/Há serviços\/controllers without testes detectados\. Priorize hotspots with mais alteractions e maior impacto\./gi, 'Services/controllers without tests were detected. Prioritize hotspots with more changes and higher impact.'],
-    [/Quebrar comandos larges in steps reutilizáveis/gi, 'Break large commands into reusable steps'],
-    [/Commands longos dificultam manutenção operationale\. Extrair passos for services\/actions melhora testabilidade e reuso\./gi, 'Long commands hurt operational maintainability. Extracting steps to services/actions improves testability and reuse.'],
-    [/Resources grandes tendem a misturar regra of negócio with configuration of UI\. Mover regra for Services\/Policies melhora evolução\./gi, 'Large resources tend to mix business rules with UI configuration. Moving rules to Services/Policies improves evolution.'],
-    [/Priorizar resolução of violactions of alto impacto/gi, 'Prioritize resolving high-impact violations'],
-    [/Existem múltiplas violactions of severidade alta\. consider uma sprint curta of estabilização arquitetural\./gi, 'There are multiple high-severity violations. Consider a short architectural stabilization sprint.'],
-    [/Extrair regras for Services\/Policies e simplificar configuração da Resource\./gi, 'Extract rules to Services/Policies and simplify Resource configuration.'],
-    [/Extrair regras para Services\/Policies e simplificar configuração da Resource\./gi, 'Extract rules to Services/Policies and simplify Resource configuration.'],
-    [/signals of authorization server-side por superfície:/gi, 'server-side authorization signals per surface:'],
-    [/com signals dynamic exigindo revisão manual\./gi, 'with dynamic signals requiring manual review.'],
-    [/uso\(s\) of SQL raw exigem revisão contextual/gi, 'raw SQL usage(s) require contextual review'],
-    [/ou Query Builder without concatenação dynamic\./gi, 'or Query Builder without dynamic concatenation.'],
-    [/prefer bindings \(`\\?` \+ array\) ou Query Builder without concatenação dynamic\./gi, 'Prefer bindings (`?` + array) or Query Builder without dynamic concatenation.'],
-    [/without Gate::define explicit; políticas existentes cover parte da authorization\./gi, 'Without explicit Gate::define; existing policies cover part of authorization.'],
-    [/for cada sql raw, valide bind seguro, limites e make explicit rationale of performance\./gi, 'For each raw SQL usage, validate safe binding, limits, and make performance rationale explicit.'],
-    [/potencialmente/gi, 'potentially'],
-    [/inseguro/gi, 'unsafe'],
-    [/concatena[cç][aã]o/gi, 'concatenation'],
-    [/configura[cç][aã]o/gi, 'configuration'],
-    [/regras/gi, 'rules'],
-    [/exigem/gi, 'require'],
-    [/revis[aã]o/gi, 'review'],
-    [/contextual/gi, 'contextual'],
-    [/pol[íi]ticas/gi, 'policies'],
-    [/parte da/gi, 'part of the'],
-    [/por superf[íi]cie/gi, 'per surface'],
-    [/\bou\b/gi, 'or'],
-    [/\bcada\b/gi, 'each'],
-    [/valide/gi, 'validate'],
-    [/versão/gi, 'version'],
-    [/acima do floor de security conhecido/gi, 'above the known security floor'],
-    [/atende floor/gi, 'meets floor'],
-    [/evitar/gi, 'avoid'],
-    [/revisar/gi, 'review'],
-    [/adicionar/gi, 'add'],
-    [/aplicar/gi, 'apply'],
-    [/prefira/gi, 'prefer'],
-    [/garanta/gi, 'ensure'],
-    [/considere/gi, 'consider'],
-    [/defina/gi, 'define'],
-    [/padronize/gi, 'standardize'],
-    [/produ[cç][aã]o/gi, 'production'],
-    [/seguran[cç]a/gi, 'security'],
-    [/autoriza[cç][aã]o/gi, 'authorization'],
-    [/valida[cç][aã]o/gi, 'validation'],
-    [/recomend[aã][cç][aã]o/gi, 'recommendation'],
-    [/detectado\(s\)/gi, 'detected'],
-    [/detectada\(s\)/gi, 'detected'],
-    [/arquivo\(s\)/gi, 'file(s)'],
-    [/ocorr[êe]ncia\(s\)/gi, 'occurrence(s)'],
-    [/chamada\(s\)/gi, 'call(s)'],
-    [/consulta\(s\)/gi, 'query(ies)'],
-    [/expl[íi]cito/gi, 'explicit'],
-    [/a[çc][õo]es/gi, 'actions'],
-    [/pain[ée]is/gi, 'panels'],
-    [/cr[íi]tic[oa]s?/gi, 'critical'],
-    [/sinais?/gi, 'signals'],
-    [/rela[cç][aã]o/gi, 'relation'],
-    [/rela[cç][õo]es/gi, 'relations'],
-    [/itera[cç][aã]o/gi, 'iteration'],
-    [/itera[cç][õo]es/gi, 'iterations'],
-    [/entrada/gi, 'input'],
-    [/inconsist[êe]ncia/gi, 'inconsistency'],
-    [/inconsist[êe]ncias/gi, 'inconsistencies'],
-    [/r[íi]gida/gi, 'strict'],
-    [/isolamento/gi, 'isolation'],
-    [/direto/gi, 'direct'],
-    [/fluxos/gi, 'flows'],
-    [/financeiros?/gi, 'financial'],
-    [/transa[cç][aã]o/gi, 'transaction'],
-    [/idempot[êe]ncia/gi, 'idempotency'],
-    [/din[âa]mic[oa]s?/gi, 'dynamic'],
-    [/explicite/gi, 'make explicit'],
-    [/racional/gi, 'rationale'],
-    [/cobrem/gi, 'cover'],
-    [/fora de/gi, 'outside of'],
-    [/ponto de uso/gi, 'point of use'],
-    [/mantenha/gi, 'keep'],
-    [/atualizado/gi, 'updated'],
-    [/corrigir/gi, 'fix'],
-    [/inseguros/gi, 'unsafe'],
-    [/compensa[cç][õo]es?/gi, 'compensating controls'],
-    [/robusta/gi, 'robust'],
-    [/assinatura/gi, 'signature'],
-    [/origem/gi, 'origin'],
-    [/m[eé]todo/gi, 'method'],
-    [/estritamente/gi, 'strictly'],
-    [/necess[áa]rios/gi, 'required'],
-    [/extens[ãa]o/gi, 'extension'],
-    [/tamanho/gi, 'size'],
-    [/campos/gi, 'fields'],
-    [/imut[áa]veis/gi, 'immutable'],
-    [/muta[cç][õo]es?/gi, 'mutations'],
-    [/responsabilidade/gi, 'responsibility'],
-    [/extenso/gi, 'large'],
-    [/linhas/gi, 'lines'],
-    [/m[eé]todos/gi, 'methods'],
-    [/\bem\b/gi, 'in'],
-    [/\bpara\b/gi, 'for'],
-    [/\bcom\b/gi, 'with'],
-    [/\bsem\b/gi, 'without'],
-    [/\bde\b/gi, 'of'],
-    [/\bno\b/gi, 'in the'],
-    [/\bna\b/gi, 'in the'],
-    [/\bprodução\b/gi, 'production'],
-    [/\bsegurança\b/gi, 'security'],
-    [/\bautorização\b/gi, 'authorization'],
-    [/\bvalidação\b/gi, 'validation'],
-    [/\brecomendação\b/gi, 'recommendation'],
-    [/\bdetectado\(s\)\b/gi, 'detected'],
-    [/\bdetectada\(s\)\b/gi, 'detected'],
-  ];
+  const exact = DYNAMIC_TEXT_EXACT_EN.get(input.trim());
+  if (exact) {
+    return exact;
+  }
 
   let output = input;
-  for (let i = 0; i < 3; i += 1) {
-    const next = replacements.reduce((acc, [pattern, replacement]) => acc.replace(pattern, replacement), output);
-    if (next === output) {
-      break;
-    }
-    output = next;
-  }
+  DYNAMIC_TEXT_PATTERNS_EN.forEach(([pattern, replacement]) => {
+    output = output.replace(pattern, replacement);
+  });
   return output;
 }
 
@@ -1255,9 +1025,13 @@ function generateHtmlReport(state, options = {}) {
   const rules = state.rules || [];
   const decisions = state.decisions || [];
   const patterns = state.model?.patterns || {};
+  const patternDriftWaves = state.model?.patternDriftWaves || [];
   const security = state.security || {};
   const securityTotals = security.totals || {};
   const securityModeSummary = security.modeSummary || {};
+  const securityDomainSummary = security.domainSummary || security.metadata?.domainSummary || {};
+  const securityCodeSummary = securityDomainSummary.code || {};
+  const securityPipelineSummary = securityDomainSummary.pipeline || {};
   const securityControls = security.controls || [];
   const dependencyAuditEngines = getDependencyAuditEngines(security.metadata?.dependencyAudits || {});
   const dependencyVulnerabilities = flattenDependencyVulnerabilities(dependencyAuditEngines).slice(0, 240);
@@ -1272,7 +1046,7 @@ function generateHtmlReport(state, options = {}) {
     achCoverage: `${copy.layering}: ${formatPercent(dimensions.layering)} · ${copy.validation}: ${formatPercent(dimensions.validation)} · ${copy.testability}: ${formatPercent(dimensions.testability)} · ${copy.consistency}: ${formatPercent(dimensions.consistency)} · ${copy.authorization}: ${formatPercent(dimensions.authorization)}`,
     trend: `${copy.trendWindowDelta}: ${trendWindowDeltaText} · ${copy.trendAverageStep}: ${trendAverageStepText} · ${copy.trendWindowSamples}: ${trendSamples}`,
     confidence: `${copy.scope}: ${scopeValue} · ${copy.trendStatus}: ${trendStatusText}`,
-    securityScore: `${copy.securityFails}: ${Number(securityTotals.fail || 0)} · ${copy.warning}: ${Number(securityTotals.warning || 0)} · ${copy.pass}: ${Number(securityTotals.pass || 0)}`,
+    securityScore: `${copy.securityFails}: ${Number(securityTotals.fail || 0)} · ${copy.warning}: ${Number(securityTotals.warning || 0)} · ${copy.pass}: ${Number(securityTotals.pass || 0)} · ${copy.securityCode}: ${formatPercent(securityCodeSummary.score || 0)} · ${copy.pipelineMaturity}: ${formatPercent(securityPipelineSummary.score || 0)}`,
     securityFails: `${copy.securityLabel}: ${formatPercent(security.score || 0)} · ${copy.dependencyVulnerabilities}: ${dependencyVulnerabilitySummary.total}`,
     scope: `${copy.scope}: ${scopeValue}`,
     layering: `${Number(state.model?.stats?.controllersUsingService || 0)} service-layer / ${Number(state.model?.stats?.controllersWithDirectModel || 0)} direct model`,
@@ -1305,6 +1079,19 @@ function generateHtmlReport(state, options = {}) {
       value: `${Number(securityTotals.pass || 0)}/${Number(securityTotals.total || 0)}`,
       hint: `${copy.pass}: ${Number(securityTotals.pass || 0)} · ${copy.warning}: ${Number(securityTotals.warning || 0)} · ${copy.fail}: ${Number(securityTotals.fail || 0)}`,
       targetPanel: 'security-panel',
+    },
+    {
+      title: copy.securityCode,
+      value: formatPercent(securityCodeSummary.score || 0),
+      hint: `${copy.securityCode}: ${formatPercent(securityCodeSummary.score || 0)} · ${copy.fail}: ${Number(securityCodeSummary.fail || 0)} · ${copy.warning}: ${Number(securityCodeSummary.warning || 0)}`,
+      targetPanel: 'security-panel',
+    },
+    {
+      title: copy.pipelineMaturity,
+      value: formatPercent(securityPipelineSummary.score || 0),
+      hint: `${copy.pipelineMaturity}: ${formatPercent(securityPipelineSummary.score || 0)} · ${copy.fail}: ${Number(securityPipelineSummary.fail || 0)} · ${copy.warning}: ${Number(securityPipelineSummary.warning || 0)} · ${copy.unknown}: ${Number(securityPipelineSummary.unknown || 0)}`,
+      targetPanel: 'security-panel',
+      securityCategory: 'pipeline',
     },
     ...(hasFilamentPageScore
       ? [
@@ -1409,6 +1196,17 @@ function generateHtmlReport(state, options = {}) {
     .sort((a, b) => b.high - a.high || b.medium - a.medium || b.total - a.total)
     .slice(0, 12);
 
+  const hotspotGroups = Array.from(hotspotMap.values())
+    .sort((a, b) => b.total - a.total);
+  const hotspotFilesCount = hotspotGroups.length;
+  const hotspotWindow = hotspotFilesCount > 0 ? Math.max(1, Math.ceil(hotspotFilesCount * 0.2)) : 0;
+  const hotspotViolations = hotspotGroups
+    .slice(0, hotspotWindow)
+    .reduce((sum, item) => sum + Number(item.total || 0), 0);
+  const hotspotConcentration = violations.length > 0
+    ? clamp(Math.round((hotspotViolations / Math.max(1, violations.length)) * 100), 0, 100)
+    : 0;
+
   const hotspotRows = hotspots
     .map(
       (item) => `
@@ -1420,6 +1218,26 @@ function generateHtmlReport(state, options = {}) {
         <td>${item.low}</td>
       </tr>`,
     )
+    .join('');
+  const driftWaveRows = patternDriftWaves
+    .slice(0, 16)
+    .map((wave) => {
+      const files = Array.isArray(wave.files) ? wave.files : [];
+      const fileTags = files
+        .slice(0, 8)
+        .map((file) => `<code>${escapeHtml(file)}</code>`)
+        .join(' ');
+      const hiddenFiles = Number(wave.hiddenFiles || 0);
+      const expected = wave.expected ? String(wave.expected) : '-';
+      return `
+      <tr>
+        <td><code>${escapeHtml(wave.key || '-')}</code></td>
+        <td>${Number(wave.count || 0)}</td>
+        <td>${escapeHtml(expected)}</td>
+        <td><span class="badge ${String(wave.severity || '').toLowerCase() === 'high' || String(wave.severity || '').toLowerCase() === 'critical' ? 'badge-high' : String(wave.severity || '').toLowerCase() === 'medium' ? 'badge-medium' : 'badge-low'}">${escapeHtml(String(wave.severity || 'low'))}</span></td>
+        <td>${fileTags || '-' }${hiddenFiles > 0 ? ` <span class="muted">+${hiddenFiles}</span>` : ''}</td>
+      </tr>`;
+    })
     .join('');
 
   const suggestionCards = suggestions
@@ -1771,6 +1589,27 @@ function generateHtmlReport(state, options = {}) {
       letter-spacing: .08em;
       color: #b8c6ea;
       font-weight: 800;
+    }
+
+    .panel-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 14px;
+      margin-top: -4px;
+      color: #8fa4d6;
+      font-size: .86rem;
+      letter-spacing: .01em;
+    }
+
+    .panel-meta strong {
+      color: #e5ecff;
+      font-weight: 800;
+    }
+
+    .muted {
+      color: #8fa4d6;
+      font-size: .82rem;
+      margin-left: 6px;
     }
 
     .score-grid {
@@ -2827,6 +2666,11 @@ function generateHtmlReport(state, options = {}) {
 
     <section class="panel">
       <h2 class="panel-title">${escapeHtml(copy.topHotspots)}</h2>
+      <div class="panel-meta">
+        <span>${escapeHtml(copy.filesWithViolations)}: <strong>${hotspotFilesCount}</strong></span>
+        <span>${escapeHtml(copy.hotspotFiles)}: <strong>${hotspotWindow}</strong></span>
+        <span>${escapeHtml(copy.hotspotConcentration)}: <strong>${hotspotConcentration}%</strong></span>
+      </div>
       ${hotspots.length === 0
         ? `<p class="empty">${escapeHtml(copy.topHotspotsEmpty)}</p>`
         : `<div class="table-wrap">
@@ -2924,6 +2768,26 @@ function generateHtmlReport(state, options = {}) {
               </tr>
             </thead>
             <tbody>${patternRows}</tbody>
+          </table>
+        </div>`}
+    </section>
+
+    <section class="panel">
+      <h2 class="panel-title">${escapeHtml(copy.driftWavesTitle)}</h2>
+      ${patternDriftWaves.length === 0
+        ? `<p class="empty">${escapeHtml(copy.driftWavesEmpty)}</p>`
+        : `<div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>${escapeHtml(copy.key)}</th>
+                <th>${escapeHtml(copy.total)}</th>
+                <th>${escapeHtml(copy.expected)}</th>
+                <th>${escapeHtml(copy.severity)}</th>
+                <th>${escapeHtml(copy.evidenceFiles)}</th>
+              </tr>
+            </thead>
+            <tbody>${driftWaveRows}</tbody>
           </table>
         </div>`}
     </section>

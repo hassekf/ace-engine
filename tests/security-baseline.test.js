@@ -114,6 +114,10 @@ class AuthServiceProvider extends \\\\Illuminate\\\\Foundation\\\\Support\\\\Pro
   assert.equal(policyCoverage.evidence.coveredModelCount, 2);
   assert.equal(gateCoverage.status, 'pass');
   assert.equal(gateCoverage.evidence.gateDefinitions, 1);
+  assert.ok(baseline.domainSummary, 'domain summary should exist');
+  assert.ok(baseline.domainSummary.code.total > 0, 'code domain should have controls');
+  assert.ok(baseline.domainSummary.pipeline.total > 0, 'pipeline domain should have controls');
+  assert.equal(baseline.metadata.domainSummary.pipeline.total, baseline.domainSummary.pipeline.total);
 });
 
 test('security baseline computes separate Filament Pages/Widgets authorization scores', () => {

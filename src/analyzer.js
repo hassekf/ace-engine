@@ -2,9 +2,11 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { lineFromIndex, normalizePath, slugify } = require('./helpers');
 
-const ANALYZER_VERSION = 16;
+const ANALYZER_VERSION = 17;
 const QUERY_BOUNDING_CALL_REGEX =
   /->(?:paginate|simplePaginate|cursorPaginate|limit|take|forPage|first|find|value|exists|count|max|min|avg|sum|pluck|chunk|chunkById|lazy|lazyById|cursor)\s*\(/;
+const QUERY_CONTEXT_SIGNAL_REGEX =
+  /(?:->(?:where|orWhere|whereIn|whereBetween|whereNull|whereNotNull|whereHas|has|doesntHave|with|withCount|withSum|withAvg|select|from|join|leftJoin|rightJoin|orderBy|groupBy|having|latest|oldest|when)\s*\(|\b[A-Z][A-Za-z0-9_\\]*::(?:query|where|with|select|from|join|leftJoin|rightJoin|latest|oldest)\s*\(|\bDB::(?:table|query)\s*\()/;
 
 function createMetrics() {
   return {
@@ -122,6 +124,7 @@ function createMetrics() {
     unboundedGetCalls: 0,
     possibleNPlusOneRisks: 0,
     criticalWritesWithoutTransaction: 0,
+    testTargets: 0,
     missingTests: 0,
   };
 }
@@ -1030,6 +1033,23 @@ function hasReceiverBoundingCallInLookback(content, getIndex, receiverVariable) 
   return receiverBoundRegex.test(lookback);
 }
 
+function hasReceiverQuerySourceInLookback(content, getIndex, receiverVariable) {
+  if (!receiverVariable) {
+    return false;
+  }
+
+  const lookbackStart = Math.max(0, getIndex - 3600);
+  const lookback = content.slice(lookbackStart, getIndex);
+  const receiver = escapeRegExp(receiverVariable);
+  const sourceRegex = new RegExp(
+    `${receiver}\\s*=\\s*(?:[A-Z][A-Za-z0-9_\\\\]*::(?:query|where|with|select|from|join|leftJoin|rightJoin|latest|oldest)|DB::(?:table|query)|${receiver}\\s*->\\s*(?:where|orWhere|with|select|from|join|leftJoin|rightJoin|orderBy|groupBy|having|latest|oldest|when|whereIn|whereBetween|whereHas|has|doesntHave))`,
+  );
+  const chainRegex = new RegExp(
+    `${receiver}\\s*->\\s*(?:where|orWhere|with|select|from|join|leftJoin|rightJoin|orderBy|groupBy|having|latest|oldest|when|whereIn|whereBetween|whereHas|has|doesntHave)\\s*\\(`,
+  );
+  return sourceRegex.test(lookback) || chainRegex.test(lookback);
+}
+
 function collectUnboundedGetLines(content) {
   const unbounded = [];
 
@@ -1038,12 +1058,21 @@ function collectUnboundedGetLines(content) {
     const statementStart = getStatementStartIndex(content, getIndex);
     const statementEnd = getStatementEndIndex(content, getIndex);
     const statementSnippet = content.slice(statementStart, statementEnd);
+    const localGetIndex = Math.max(0, getIndex - statementStart);
+    const beforeGetSnippet = statementSnippet.slice(0, localGetIndex);
+    const relationStyleChain = /->[A-Za-z_][A-Za-z0-9_]*\s*\(\s*\)\s*->\s*get\s*\(\s*\)/.test(statementSnippet);
+    const hasInlineQueryContext = QUERY_CONTEXT_SIGNAL_REGEX.test(beforeGetSnippet) || relationStyleChain;
+    const receiverVariable = extractGetReceiverVariable(statementSnippet);
+    const hasReceiverQuerySource = hasReceiverQuerySourceInLookback(content, getIndex, receiverVariable);
+
+    if (!hasInlineQueryContext && !hasReceiverQuerySource) {
+      continue;
+    }
 
     if (QUERY_BOUNDING_CALL_REGEX.test(statementSnippet)) {
       continue;
     }
 
-    const receiverVariable = extractGetReceiverVariable(statementSnippet);
     if (hasReceiverBoundingCallInLookback(content, getIndex, receiverVariable)) {
       continue;
     }
@@ -1052,6 +1081,45 @@ function collectUnboundedGetLines(content) {
   }
 
   return unbounded;
+}
+
+function checkMissingTest({
+  metrics,
+  signals,
+  violations,
+  testBasenames,
+  relativePath,
+  testRequired,
+  message,
+  rationale,
+  suggestion,
+  severity = 'low',
+}) {
+  if (!testRequired) {
+    signals.hasTest = true;
+    return;
+  }
+
+  metrics.testTargets += 1;
+  const fileBasename = path.basename(relativePath, '.php');
+  const hasMatchingTest = testBasenames.has(`${fileBasename}Test`) || testBasenames.has(fileBasename);
+  signals.hasTest = hasMatchingTest;
+  if (hasMatchingTest) {
+    return;
+  }
+
+  metrics.missingTests += 1;
+  violations.push(
+    createViolation({
+      type: 'missing-test',
+      severity,
+      file: relativePath,
+      line: 1,
+      message,
+      rationale,
+      suggestion,
+    }),
+  );
 }
 
 function detectLoopRelationAccessCount(content) {
@@ -1298,22 +1366,17 @@ function analyzeController({ relativePath, content, metrics, signals, violations
   }
 
   const fileBasename = path.basename(relativePath, '.php');
-  const hasMatchingTest = testBasenames.has(`${fileBasename}Test`) || testBasenames.has(fileBasename);
-  signals.hasTest = hasMatchingTest;
-  if (!hasMatchingTest) {
-    metrics.missingTests += 1;
-    violations.push(
-      createViolation({
-        type: 'missing-test',
-        severity: 'low',
-        file: relativePath,
-        line: 1,
-        message: `Nenhum teste detectado para ${fileBasename}`,
-        rationale: 'Cobertura baixa aumenta regressões em refactor.',
-        suggestion: `Adicionar ao menos um teste para ${fileBasename}.`,
-      }),
-    );
-  }
+  checkMissingTest({
+    metrics,
+    signals,
+    violations,
+    testBasenames,
+    relativePath,
+    testRequired: true,
+    message: `Nenhum teste detectado para ${fileBasename}`,
+    rationale: 'Cobertura baixa aumenta regressões em refactor.',
+    suggestion: `Adicionar ao menos um teste para ${fileBasename}.`,
+  });
 
   analyzeDynamicRawSql({ relativePath, content, metrics, signals, violations });
   analyzeQueryDiscipline({
@@ -1332,23 +1395,17 @@ function analyzeService({ relativePath, content, metrics, signals, violations, t
   signals.methodCount = extractFunctionBlocks(content).length;
 
   const fileBasename = path.basename(relativePath, '.php');
-  const hasMatchingTest = testBasenames.has(`${fileBasename}Test`) || testBasenames.has(fileBasename);
-  signals.hasTest = hasMatchingTest;
-
-  if (!hasMatchingTest) {
-    metrics.missingTests += 1;
-    violations.push(
-      createViolation({
-        type: 'missing-test',
-        severity: 'low',
-        file: relativePath,
-        line: 1,
-        message: `Service ${fileBasename} sem teste dedicado`,
-        rationale: 'Serviços concentram regra de negócio e precisam validação de comportamento.',
-        suggestion: `Adicionar teste unitário para ${fileBasename}.`,
-      }),
-    );
-  }
+  checkMissingTest({
+    metrics,
+    signals,
+    violations,
+    testBasenames,
+    relativePath,
+    testRequired: true,
+    message: `Service ${fileBasename} sem teste dedicado`,
+    rationale: 'Serviços concentram regra de negócio e precisam validação de comportamento.',
+    suggestion: `Adicionar teste unitário para ${fileBasename}.`,
+  });
 
   if (signals.fileLineCount > threshold(thresholds, 'fatServiceLines', 260)) {
     violations.push(
@@ -1495,22 +1552,17 @@ function analyzeJob({ relativePath, content, metrics, signals, violations, testB
   }
 
   const fileBasename = path.basename(relativePath, '.php');
-  const hasMatchingTest = testBasenames.has(`${fileBasename}Test`) || testBasenames.has(fileBasename);
-  signals.hasTest = hasMatchingTest;
-  if (!hasMatchingTest) {
-    metrics.missingTests += 1;
-    violations.push(
-      createViolation({
-        type: 'missing-test',
-        severity: 'low',
-        file: relativePath,
-        line: 1,
-        message: `Job ${fileBasename} sem teste dedicado`,
-        rationale: 'Jobs concentram fluxos assíncronos com alta chance de regressão.',
-        suggestion: `Adicionar teste para ${fileBasename}.`,
-      }),
-    );
-  }
+  checkMissingTest({
+    metrics,
+    signals,
+    violations,
+    testBasenames,
+    relativePath,
+    testRequired: true,
+    message: `Job ${fileBasename} sem teste dedicado`,
+    rationale: 'Jobs concentram fluxos assíncronos com alta chance de regressão.',
+    suggestion: `Adicionar teste para ${fileBasename}.`,
+  });
 
   analyzeDynamicRawSql({ relativePath, content, metrics, signals, violations });
   analyzeQueryDiscipline({
@@ -1548,11 +1600,18 @@ function analyzeListener({ relativePath, content, metrics, signals, violations, 
   }
 
   const fileBasename = path.basename(relativePath, '.php');
-  const hasMatchingTest = testBasenames.has(`${fileBasename}Test`) || testBasenames.has(fileBasename);
-  signals.hasTest = hasMatchingTest;
-  if (!hasMatchingTest) {
-    metrics.missingTests += 1;
-  }
+  const listenerNeedsDedicatedTest = hasQueueSignal || signals.fileLineCount > 140;
+  checkMissingTest({
+    metrics,
+    signals,
+    violations,
+    testBasenames,
+    relativePath,
+    testRequired: listenerNeedsDedicatedTest,
+    message: `Listener ${fileBasename} sem teste dedicado`,
+    rationale: 'Listeners com fila ou alta complexidade merecem testes para evitar efeitos colaterais silenciosos.',
+    suggestion: `Adicionar teste para ${fileBasename} ou reduzir complexidade do listener.`,
+  });
 
   analyzeDynamicRawSql({ relativePath, content, metrics, signals, violations });
 }
@@ -1595,11 +1654,17 @@ function analyzeMiddleware({ relativePath, content, metrics, signals, violations
   }
 
   const fileBasename = path.basename(relativePath, '.php');
-  const hasMatchingTest = testBasenames.has(`${fileBasename}Test`) || testBasenames.has(fileBasename);
-  signals.hasTest = hasMatchingTest;
-  if (!hasMatchingTest) {
-    metrics.missingTests += 1;
-  }
+  checkMissingTest({
+    metrics,
+    signals,
+    violations,
+    testBasenames,
+    relativePath,
+    testRequired: true,
+    message: `Middleware ${fileBasename} sem teste dedicado`,
+    rationale: 'Middlewares alteram o pipeline HTTP e podem quebrar autorização/fluxo silenciosamente.',
+    suggestion: `Adicionar teste para ${fileBasename}.`,
+  });
 
   analyzeDynamicRawSql({ relativePath, content, metrics, signals, violations });
 }
@@ -2224,21 +2289,20 @@ function analyzeModel({ relativePath, content, metrics, signals, violations, tes
   }
 
   const fileBasename = path.basename(relativePath, '.php');
-  const hasMatchingTest = testBasenames.has(`${fileBasename}Test`) || testBasenames.has(fileBasename);
-  signals.hasTest = hasMatchingTest;
-  if (!hasMatchingTest) {
-    metrics.missingTests += 1;
-  }
-
-  analyzeDynamicRawSql({ relativePath, content, metrics, signals, violations });
-  analyzeQueryDiscipline({
-    relativePath,
-    content,
+  const modelNeedsDedicatedTest = methodCount > 4 || signals.fileLineCount > 220;
+  checkMissingTest({
     metrics,
     signals,
     violations,
-    sourceKind: 'command',
+    testBasenames,
+    relativePath,
+    testRequired: modelNeedsDedicatedTest,
+    message: `Model ${fileBasename} sem teste dedicado`,
+    rationale: 'Models com comportamento relevante devem ser cobertos para reduzir regressões de domínio.',
+    suggestion: `Adicionar teste para ${fileBasename} ou manter o model enxuto.`,
   });
+
+  analyzeDynamicRawSql({ relativePath, content, metrics, signals, violations });
   analyzeCriticalWriteTransaction({ relativePath, content, metrics, signals, violations });
 }
 

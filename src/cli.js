@@ -247,6 +247,7 @@ function statusPayload(root) {
       score: Number(state.security?.score || 0),
       totals: state.security?.totals || {},
       modeSummary: state.security?.modeSummary || {},
+      domainSummary: state.security?.domainSummary || {},
     },
     violations: state.violations.length,
     waivedViolations: (state.waivedViolations || []).length,
@@ -264,6 +265,15 @@ function statusPayload(root) {
     waivers: {
       total: Number(config.waivers?.length || 0),
       active: Number((config.waivers || []).filter((item) => item.status === 'active').length),
+    },
+    enforcement: {
+      enabled: Boolean(config.enforcement?.enabled),
+      failOnRegression: config.enforcement?.failOnRegression ?? true,
+      thresholds: {
+        minCoverage: Number(config.enforcement?.thresholds?.minCoverage ?? 0),
+        maxRegressionDrop: Number(config.enforcement?.thresholds?.maxRegressionDrop ?? 5),
+        maxSecurityFailures: Number(config.enforcement?.thresholds?.maxSecurityFailures ?? 0),
+      },
     },
     updatedAt: state.updatedAt,
     lastScan: state.lastScan,
@@ -323,12 +333,18 @@ async function runCli(argv) {
     console.log(
       `Security baseline: ${payload.security.score}% | falhas: ${Number(payload.security.totals.fail || 0)} | alertas: ${Number(payload.security.totals.warning || 0)}`,
     );
+    console.log(
+      `Security split: code ${Number(payload.security.domainSummary?.code?.score || 0)}% | pipeline ${Number(payload.security.domainSummary?.pipeline?.score || 0)}%`,
+    );
     console.log(`Inconsistências: ${payload.violations}`);
     console.log(`Waived: ${payload.waivedViolations}`);
     console.log(`Sugestões: ${payload.suggestions}`);
     console.log(`Regras: ${payload.rules}`);
     console.log(`Decisões: ${payload.decisions}`);
     console.log(`Waivers ativos: ${payload.waivers.active}/${payload.waivers.total}`);
+    console.log(
+      `Enforcement (config): ${payload.enforcement.enabled ? 'on' : 'off'} | minCoverage=${payload.enforcement.thresholds.minCoverage}% | maxRegressionDrop=${payload.enforcement.thresholds.maxRegressionDrop}`,
+    );
     console.log(`Padrões ativos: ${payload.patterns}`);
     console.log(`Módulos ativos: ${payload.modules.enabled}/${payload.modules.total}`);
     console.log(`Atualizado em: ${payload.updatedAt}`);
@@ -364,6 +380,7 @@ async function runCli(argv) {
     console.log(
       `ACE init concluído | artefatos criados: ${created} | LLMs: ${payload.llms.join(', ')} | integração: ${payload.integrationDir}`,
     );
+    console.log('Enforcement policy versionável em .ace/config.json (default: disabled).');
     return;
   }
 
