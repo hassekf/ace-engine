@@ -13,6 +13,12 @@ test('aggregateFromFileIndex sums metrics including new performance/integrity co
         unboundedGetCalls: 2,
         possibleNPlusOneRisks: 1,
         criticalWritesWithoutTransaction: 0,
+        traits: 1,
+        contracts: 1,
+        contractsWithoutContainerBinding: 1,
+        httpResources: 1,
+        httpResourcesWithoutWhenLoaded: 1,
+        httpResourceRelationsWithoutWhenLoaded: 2,
         rawSqlCalls: 1,
         unsafeRawSqlCalls: 0,
         safeRawSqlCalls: 1,
@@ -26,6 +32,12 @@ test('aggregateFromFileIndex sums metrics including new performance/integrity co
         unboundedGetCalls: 1,
         possibleNPlusOneRisks: 0,
         criticalWritesWithoutTransaction: 1,
+        traits: 0,
+        contracts: 1,
+        contractsWithContainerBinding: 1,
+        httpResources: 1,
+        httpResourcesUsingWhenLoaded: 1,
+        httpResourceRelationsWithoutWhenLoaded: 0,
         rawSqlCalls: 2,
         unsafeRawSqlCalls: 1,
         safeRawSqlCalls: 1,
@@ -40,6 +52,14 @@ test('aggregateFromFileIndex sums metrics including new performance/integrity co
   assert.equal(payload.metrics.unboundedGetCalls, 3);
   assert.equal(payload.metrics.possibleNPlusOneRisks, 1);
   assert.equal(payload.metrics.criticalWritesWithoutTransaction, 1);
+  assert.equal(payload.metrics.traits, 1);
+  assert.equal(payload.metrics.contracts, 2);
+  assert.equal(payload.metrics.contractsWithContainerBinding, 1);
+  assert.equal(payload.metrics.contractsWithoutContainerBinding, 1);
+  assert.equal(payload.metrics.httpResources, 2);
+  assert.equal(payload.metrics.httpResourcesUsingWhenLoaded, 1);
+  assert.equal(payload.metrics.httpResourcesWithoutWhenLoaded, 1);
+  assert.equal(payload.metrics.httpResourceRelationsWithoutWhenLoaded, 2);
   assert.equal(payload.metrics.rawSqlCalls, 3);
   assert.equal(payload.metrics.unsafeRawSqlCalls, 1);
   assert.equal(payload.metrics.safeRawSqlCalls, 2);

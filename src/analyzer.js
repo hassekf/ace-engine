@@ -2,7 +2,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { lineFromIndex, normalizePath, slugify } = require('./helpers');
 
-const ANALYZER_VERSION = 11;
+const ANALYZER_VERSION = 13;
 
 function createMetrics() {
   return {
@@ -28,6 +28,17 @@ function createMetrics() {
     middlewares: 0,
     fatMiddlewares: 0,
     middlewaresWithDirectModel: 0,
+    traits: 0,
+    fatTraits: 0,
+    highCouplingTraits: 0,
+    traitsWithDirectModel: 0,
+    contracts: 0,
+    contractsWithContainerBinding: 0,
+    contractsWithoutContainerBinding: 0,
+    httpResources: 0,
+    httpResourcesUsingWhenLoaded: 0,
+    httpResourcesWithoutWhenLoaded: 0,
+    httpResourceRelationsWithoutWhenLoaded: 0,
     enums: 0,
     dtos: 0,
     commands: 0,
@@ -108,6 +119,8 @@ function createSignals() {
     hasQueueTimeout: false,
     hasQueueUnique: false,
     hasQueueFailedHandler: false,
+    hasWhenLoaded: false,
+    resourceRelationAccesses: [],
     hasTest: false,
   };
 }
@@ -153,6 +166,18 @@ function detectKind(relativePath, content) {
 
   if (normalized.includes('/Http/Middleware/')) {
     return 'middleware';
+  }
+
+  if (normalized.includes('/Traits/')) {
+    return 'trait';
+  }
+
+  if (normalized.includes('/Contracts/')) {
+    return 'contract';
+  }
+
+  if (normalized.includes('/Http/Resources/')) {
+    return 'http-resource';
   }
 
   if (normalized.includes('/Filament/') && normalized.includes('/Resources/')) {
@@ -223,6 +248,14 @@ function detectKind(relativePath, content) {
     return 'request';
   }
 
+  if (/namespace\s+App\\Contracts\\/.test(content)) {
+    return 'contract';
+  }
+
+  if (/extends\s+(?:JsonResource|ResourceCollection)\b/.test(content)) {
+    return 'http-resource';
+  }
+
   if (/enum\s+[A-Za-z0-9_]+\b/.test(content)) {
     return 'enum';
   }
@@ -272,6 +305,95 @@ function collectModelStaticCalls(content, modelAliases) {
     });
   }
   return calls;
+}
+
+function listPhpFilesRecursive(rootDir) {
+  if (!rootDir || !fs.existsSync(rootDir)) {
+    return [];
+  }
+
+  const files = [];
+  const stack = [rootDir];
+  while (stack.length > 0) {
+    const current = stack.pop();
+    const entries = fs.readdirSync(current, { withFileTypes: true });
+    for (const entry of entries) {
+      const fullPath = path.join(current, entry.name);
+      if (entry.isDirectory()) {
+        stack.push(fullPath);
+        continue;
+      }
+      if (entry.isFile() && fullPath.endsWith('.php')) {
+        files.push(fullPath);
+      }
+    }
+  }
+
+  return files;
+}
+
+function classBasename(candidate) {
+  if (!candidate) {
+    return '';
+  }
+  const normalized = String(candidate).replace(/\\\\/g, '\\').replace(/^\\+/, '');
+  const parts = normalized.split('\\');
+  return parts[parts.length - 1] || '';
+}
+
+function extractClassNameFromBindingArg(argument) {
+  const raw = String(argument || '').trim();
+  if (!raw) {
+    return '';
+  }
+
+  const classRefMatch = raw.match(/([A-Za-z0-9_\\]+)::class/);
+  if (classRefMatch) {
+    return classBasename(classRefMatch[1]);
+  }
+
+  const quotedClassMatch = raw.match(/['"]([A-Za-z0-9_\\\\]+)['"]/);
+  if (quotedClassMatch) {
+    return classBasename(quotedClassMatch[1]);
+  }
+
+  return classBasename(raw);
+}
+
+function collectBoundContractsFromProviders(root) {
+  const boundContracts = new Set();
+  const providerFiles = listPhpFilesRecursive(path.join(root, 'app', 'Providers'));
+
+  providerFiles.forEach((providerPath) => {
+    let content = '';
+    try {
+      content = fs.readFileSync(providerPath, 'utf8');
+    } catch (error) {
+      return;
+    }
+
+    for (const match of content.matchAll(/\b(?:bind|singleton|scoped)\s*\(\s*([A-Za-z0-9_\\:'"]+)\s*,/g)) {
+      const contractName = extractClassNameFromBindingArg(match[1]);
+      if (contractName.endsWith('Interface')) {
+        boundContracts.add(contractName);
+      }
+    }
+
+    for (const match of content.matchAll(/\b([A-Za-z0-9_\\]+Interface)::class\s*=>\s*[A-Za-z0-9_\\]+::class/g)) {
+      const contractName = classBasename(match[1]);
+      if (contractName.endsWith('Interface')) {
+        boundContracts.add(contractName);
+      }
+    }
+  });
+
+  return boundContracts;
+}
+
+function createAnalysisContext(root) {
+  return {
+    boundContracts: collectBoundContractsFromProviders(root),
+  };
 }
 
 function analyzeDynamicRawSql({ relativePath, content, metrics, signals, violations }) {
@@ -593,6 +715,46 @@ function detectLoopRelationAccessCount(content) {
     count += Array.from(content.matchAll(relationRegex)).length;
   }
   return count;
+}
+
+function collectResourceRelationAccesses(content) {
+  const accesses = [];
+
+  for (const match of content.matchAll(/=>\s*\$this->([A-Za-z_][A-Za-z0-9_]*)\s*\??->/g)) {
+    accesses.push({
+      relation: match[1],
+      line: lineFromIndex(content, match.index),
+    });
+  }
+
+  for (const match of content.matchAll(/new\s+[A-Za-z0-9_\\]+Resource(?:Collection)?\s*\(\s*\$this->([A-Za-z_][A-Za-z0-9_]*)\s*\)/g)) {
+    accesses.push({
+      relation: match[1],
+      line: lineFromIndex(content, match.index),
+    });
+  }
+
+  for (const match of content.matchAll(/\b[A-Za-z0-9_\\]+Resource(?:Collection)?::(?:make|collection)\s*\(\s*\$this->([A-Za-z_][A-Za-z0-9_]*)\s*\)/g)) {
+    accesses.push({
+      relation: match[1],
+      line: lineFromIndex(content, match.index),
+    });
+  }
+
+  return accesses;
+}
+
+function collectResourceGuardedRelations(content) {
+  const guarded = new Set();
+
+  for (const match of content.matchAll(/\b(?:whenLoaded|whenCounted|whenAggregated|relationLoaded)\s*\(\s*['"]([A-Za-z_][A-Za-z0-9_\.]*)['"]/g)) {
+    const relation = String(match[1] || '').split('.')[0];
+    if (relation) {
+      guarded.add(relation);
+    }
+  }
+
+  return guarded;
 }
 
 function analyzeQueryDiscipline({ relativePath, content, metrics, signals, violations, sourceKind }) {
@@ -1087,6 +1249,137 @@ function analyzeMiddleware({ relativePath, content, metrics, signals, violations
   analyzeDynamicRawSql({ relativePath, content, metrics, signals, violations });
 }
 
+function analyzeTrait({ relativePath, content, metrics, signals, violations, thresholds }) {
+  metrics.traits = 1;
+  signals.fileLineCount = content.split('\n').length;
+
+  const functionBlocks = extractFunctionBlocks(content);
+  signals.methodCount = functionBlocks.length;
+
+  if (
+    signals.fileLineCount > threshold(thresholds, 'fatTraitLines', 180) ||
+    signals.methodCount > threshold(thresholds, 'fatTraitMethods', 10)
+  ) {
+    metrics.fatTraits = 1;
+    violations.push(
+      createViolation({
+        type: 'fat-trait',
+        severity: 'low',
+        file: relativePath,
+        line: 1,
+        message: `Trait extenso (${signals.fileLineCount} linhas / ${signals.methodCount} métodos)`,
+        rationale: 'Traits extensos tendem a concentrar múltiplas responsabilidades e dificultam manutenção.',
+        suggestion: 'Quebre o trait em partes menores ou mova regra para service/action dedicada.',
+      }),
+    );
+  }
+
+  const appImports = collectImports(content).filter(
+    (item) => item.fqcn.startsWith('App\\') && !item.fqcn.startsWith('App\\Traits\\'),
+  );
+  if (appImports.length > threshold(thresholds, 'highTraitImports', 8)) {
+    metrics.highCouplingTraits = 1;
+    violations.push(
+      createViolation({
+        type: 'trait-high-coupling',
+        severity: 'medium',
+        file: relativePath,
+        line: 1,
+        message: `Trait com acoplamento alto detectado (${appImports.length} imports de App\\*)`,
+        rationale: 'Traits altamente acoplados aumentam dependências implícitas e risco de efeitos colaterais.',
+        suggestion: 'Reduza dependências no trait e prefira composições explícitas em serviços.',
+      }),
+    );
+  }
+
+  const modelAliases = collectImportedModelAliases(content);
+  const modelCalls = collectModelStaticCalls(content, modelAliases);
+  if (modelCalls.length > 0) {
+    metrics.traitsWithDirectModel = 1;
+    violations.push(
+      createViolation({
+        type: 'trait-direct-model',
+        severity: 'medium',
+        file: relativePath,
+        line: modelCalls[0].line,
+        message: 'Trait com acesso direto a Model detectado',
+        rationale: 'Acesso direto a Model em trait cria acoplamento transversal e dificulta previsibilidade.',
+        suggestion: 'Delegue consultas/escritas para service/use case chamado pelo ponto de uso do trait.',
+      }),
+    );
+  }
+
+  analyzeDynamicRawSql({ relativePath, content, metrics, signals, violations });
+}
+
+function analyzeContract({ relativePath, content, metrics, signals, violations, analysisContext }) {
+  metrics.contracts = 1;
+  signals.fileLineCount = content.split('\n').length;
+
+  const interfaceMatch = content.match(/\binterface\s+([A-Za-z_][A-Za-z0-9_]*)\b/);
+  if (!interfaceMatch) {
+    return;
+  }
+
+  const contractName = interfaceMatch[1];
+  if (!contractName.endsWith('Interface')) {
+    return;
+  }
+
+  const hasBinding = analysisContext?.boundContracts?.has(contractName);
+  if (hasBinding) {
+    metrics.contractsWithContainerBinding = 1;
+    return;
+  }
+
+  metrics.contractsWithoutContainerBinding = 1;
+  violations.push(
+    createViolation({
+      type: 'contract-without-container-binding',
+      severity: 'low',
+      file: relativePath,
+      line: lineFromIndex(content, interfaceMatch.index),
+      message: `Contrato ${contractName} sem bind/singleton/scoped detectado`,
+      rationale: 'Interfaces sem binding explícito no container podem causar resolução inconsistente entre ambientes.',
+      suggestion: 'Registre o contrato em provider com `bind`, `singleton` ou `scoped`.',
+    }),
+  );
+}
+
+function analyzeHttpResource({ relativePath, content, metrics, signals, violations }) {
+  metrics.httpResources = 1;
+  signals.fileLineCount = content.split('\n').length;
+  signals.methodCount = extractFunctionBlocks(content).length;
+
+  const relationAccesses = collectResourceRelationAccesses(content);
+  const guardedRelations = collectResourceGuardedRelations(content);
+  const hasWhenLoaded = /\bwhenLoaded\s*\(/.test(content);
+
+  signals.hasWhenLoaded = hasWhenLoaded;
+  signals.resourceRelationAccesses = relationAccesses;
+
+  if (hasWhenLoaded) {
+    metrics.httpResourcesUsingWhenLoaded = 1;
+  }
+
+  const riskyAccesses = relationAccesses.filter((item) => !guardedRelations.has(item.relation));
+  if (riskyAccesses.length > 0) {
+    metrics.httpResourcesWithoutWhenLoaded = 1;
+    metrics.httpResourceRelationsWithoutWhenLoaded += riskyAccesses.length;
+    violations.push(
+      createViolation({
+        type: 'resource-relation-without-whenloaded',
+        severity: 'medium',
+        file: relativePath,
+        line: riskyAccesses[0].line,
+        message: `${riskyAccesses.length} acesso(s) de relação em Resource sem guardas explícitas`,
+        rationale: 'Acesso direto de relação em Resource pode disparar lazy loading e risco de N+1.',
+        suggestion: 'Use `whenLoaded()`/`whenCounted()` (ou `relationLoaded`) para relações opcionais em Resources.',
+      }),
+    );
+  }
+}
+
 function analyzeModel({ relativePath, content, metrics, signals, violations, testBasenames, thresholds }) {
   metrics.models = 1;
   signals.fileLineCount = content.split('\n').length;
@@ -1393,7 +1686,7 @@ function analyzeLivewireComponent({ relativePath, content, metrics, signals, vio
   analyzeDynamicRawSql({ relativePath, content, metrics, signals, violations });
 }
 
-function analyzePhpFile({ relativePath, absolutePath, content, testBasenames, thresholds = {} }) {
+function analyzePhpFile({ relativePath, absolutePath, content, testBasenames, thresholds = {}, analysisContext = {} }) {
   const metrics = createMetrics();
   const signals = createSignals();
   const violations = [];
@@ -1409,6 +1702,12 @@ function analyzePhpFile({ relativePath, absolutePath, content, testBasenames, th
     analyzeListener({ relativePath, content, metrics, signals, violations, testBasenames });
   } else if (kind === 'middleware') {
     analyzeMiddleware({ relativePath, content, metrics, signals, violations, testBasenames, thresholds });
+  } else if (kind === 'trait') {
+    analyzeTrait({ relativePath, content, metrics, signals, violations, thresholds });
+  } else if (kind === 'contract') {
+    analyzeContract({ relativePath, content, metrics, signals, violations, analysisContext });
+  } else if (kind === 'http-resource') {
+    analyzeHttpResource({ relativePath, content, metrics, signals, violations });
   } else if (kind === 'command') {
     analyzeCommand({ relativePath, content, metrics, signals, violations, thresholds });
   } else if (kind === 'filament-resource') {
@@ -1456,6 +1755,7 @@ function analyzePhpFile({ relativePath, absolutePath, content, testBasenames, th
 
 function analyzeFiles({ files, root, testBasenames, thresholds = {} }) {
   const perFile = {};
+  const analysisContext = createAnalysisContext(root);
 
   for (const absolutePath of files) {
     if (!absolutePath.endsWith('.php') || !fs.existsSync(absolutePath)) {
@@ -1471,6 +1771,7 @@ function analyzeFiles({ files, root, testBasenames, thresholds = {} }) {
       content,
       testBasenames,
       thresholds,
+      analysisContext,
     });
   }
 

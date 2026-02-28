@@ -203,6 +203,45 @@ function buildSuggestions({ metrics, coverage, model, violations, security = nul
     );
   }
 
+  if ((metrics.httpResourcesWithoutWhenLoaded || 0) > 0) {
+    suggestions.push(
+      createSuggestion({
+        category: 'performance',
+        title: 'Aplicar guardas de relação em API Resources',
+        details:
+          `Foram detectados ${Number(metrics.httpResourceRelationsWithoutWhenLoaded || 0)} acesso(s) de relação sem \`whenLoaded/relationLoaded\` em Resources. Isso pode induzir lazy loading e N+1.`,
+        impact: 'high',
+        effort: 'low',
+      }),
+    );
+  }
+
+  if ((metrics.fatTraits || 0) > 0 || (metrics.highCouplingTraits || 0) > 0 || (metrics.traitsWithDirectModel || 0) > 0) {
+    suggestions.push(
+      createSuggestion({
+        category: 'architecture',
+        title: 'Reduzir acoplamento e escopo de Traits',
+        details:
+          'Há sinais de traits grandes/acoplados e/ou com acesso direto a Model. Centralize regra de negócio em Services/UseCases e mantenha traits focados em composição leve.',
+        impact: 'medium',
+        effort: 'medium',
+      }),
+    );
+  }
+
+  if ((metrics.contractsWithoutContainerBinding || 0) > 0) {
+    suggestions.push(
+      createSuggestion({
+        category: 'architecture',
+        title: 'Completar bindings de Contracts no container',
+        details:
+          `Foram detectados ${Number(metrics.contractsWithoutContainerBinding || 0)} contratos sem bind/singleton/scoped explícito em providers.`,
+        impact: 'high',
+        effort: 'low',
+      }),
+    );
+  }
+
   if (metrics.requestAllCalls > 0) {
     suggestions.push(
       createSuggestion({

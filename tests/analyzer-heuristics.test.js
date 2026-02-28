@@ -392,3 +392,165 @@ enum UserStatus: string
   assert.equal(payload['app/DTOs/CreateUserDto.php'].kind, 'dto');
   assert.equal(payload['app/Enums/UserStatus.php'].kind, 'enum');
 });
+
+test('analyzer classifies http resources and flags relation access without whenLoaded guard', () => {
+  const root = makeTmpRoot();
+  const resourceFile = path.join(root, 'app', 'Http', 'Resources', 'UserResource.php');
+
+  writePhp(
+    resourceFile,
+    `<?php
+namespace App\\Http\\Resources;
+
+use Illuminate\\Http\\Resources\\Json\\JsonResource;
+
+class UserResource extends JsonResource
+{
+    public function toArray($request): array
+    {
+        return [
+            'id' => $this->id,
+            'wallet_balance' => $this->wallet->balance,
+        ];
+    }
+}
+`,
+  );
+
+  const payload = analyzeFiles({
+    root,
+    files: [resourceFile],
+    testBasenames: new Set(),
+    thresholds: {},
+  });
+
+  const entry = payload['app/Http/Resources/UserResource.php'];
+  assert.ok(entry, 'resource entry should exist');
+  assert.equal(entry.kind, 'http-resource');
+  assert.equal(entry.metrics.httpResources, 1);
+  assert.equal(entry.metrics.httpResourcesWithoutWhenLoaded, 1);
+  assert.equal(entry.metrics.httpResourceRelationsWithoutWhenLoaded, 1);
+  const types = new Set((entry.violations || []).map((item) => item.type));
+  assert.ok(types.has('resource-relation-without-whenloaded'));
+});
+
+test('analyzer classifies traits and contracts with dedicated checks', () => {
+  const root = makeTmpRoot();
+  const traitFile = path.join(root, 'app', 'Traits', 'BillingTrait.php');
+  const contractFile = path.join(root, 'app', 'Contracts', 'BillingGatewayInterface.php');
+
+  writePhp(
+    traitFile,
+    `<?php
+namespace App\\Traits;
+
+use App\\Models\\Wallet;
+use App\\Services\\BillingService;
+use App\\Services\\WalletService;
+use App\\Services\\LedgerService;
+use App\\Services\\RiskService;
+use App\\Services\\AuditService;
+use App\\Services\\CouponService;
+use App\\Services\\CommissionService;
+use App\\Services\\NotificationService;
+use App\\Services\\WithdrawalService;
+
+trait BillingTrait
+{
+    public function applyCharge(int $walletId): void
+    {
+        Wallet::query()->where('id', $walletId)->increment('balance', 1);
+    }
+}
+`,
+  );
+
+  writePhp(
+    contractFile,
+    `<?php
+namespace App\\Contracts;
+
+interface BillingGatewayInterface
+{
+    public function charge(int $amount): bool;
+}
+`,
+  );
+
+  const payload = analyzeFiles({
+    root,
+    files: [traitFile, contractFile],
+    testBasenames: new Set(),
+    thresholds: {},
+  });
+
+  const traitEntry = payload['app/Traits/BillingTrait.php'];
+  const contractEntry = payload['app/Contracts/BillingGatewayInterface.php'];
+
+  assert.ok(traitEntry, 'trait entry should exist');
+  assert.ok(contractEntry, 'contract entry should exist');
+
+  assert.equal(traitEntry.kind, 'trait');
+  assert.equal(traitEntry.metrics.traits, 1);
+  assert.equal(traitEntry.metrics.highCouplingTraits, 1);
+  assert.equal(traitEntry.metrics.traitsWithDirectModel, 1);
+  const traitTypes = new Set((traitEntry.violations || []).map((item) => item.type));
+  assert.ok(traitTypes.has('trait-high-coupling'));
+  assert.ok(traitTypes.has('trait-direct-model'));
+
+  assert.equal(contractEntry.kind, 'contract');
+  assert.equal(contractEntry.metrics.contracts, 1);
+  assert.equal(contractEntry.metrics.contractsWithoutContainerBinding, 1);
+  const contractTypes = new Set((contractEntry.violations || []).map((item) => item.type));
+  assert.ok(contractTypes.has('contract-without-container-binding'));
+});
+
+test('analyzer detects contract bindings declared in providers', () => {
+  const root = makeTmpRoot();
+  const contractFile = path.join(root, 'app', 'Contracts', 'SmsProviderInterface.php');
+  const providerFile = path.join(root, 'app', 'Providers', 'CommunicationServiceProvider.php');
+
+  writePhp(
+    contractFile,
+    `<?php
+namespace App\\Contracts;
+
+interface SmsProviderInterface
+{
+    public function send(string $to, string $body): bool;
+}
+`,
+  );
+
+  writePhp(
+    providerFile,
+    `<?php
+namespace App\\Providers;
+
+use App\\Contracts\\SmsProviderInterface;
+use App\\Services\\TwilioSmsProvider;
+use Illuminate\\Support\\ServiceProvider;
+
+class CommunicationServiceProvider extends ServiceProvider
+{
+    public function register(): void
+    {
+        $this->app->singleton(SmsProviderInterface::class, TwilioSmsProvider::class);
+    }
+}
+`,
+  );
+
+  const payload = analyzeFiles({
+    root,
+    files: [contractFile, providerFile],
+    testBasenames: new Set(),
+    thresholds: {},
+  });
+
+  const contractEntry = payload['app/Contracts/SmsProviderInterface.php'];
+  assert.ok(contractEntry, 'contract entry should exist');
+  assert.equal(contractEntry.metrics.contracts, 1);
+  assert.equal(contractEntry.metrics.contractsWithContainerBinding, 1);
+  assert.equal(contractEntry.metrics.contractsWithoutContainerBinding, 0);
+});

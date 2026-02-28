@@ -439,6 +439,9 @@ ACE classifies PHP files into kinds for targeted analysis:
 | `job` | `app/Jobs/` |
 | `listener` | `app/Listeners/` |
 | `middleware` | `app/Http/Middleware/` |
+| `trait` | `app/Traits/` |
+| `contract` | `app/Contracts/` or `App\\Contracts` interfaces |
+| `http-resource` | `app/Http/Resources/` or classes extending `JsonResource`/`ResourceCollection` |
 | `model` | `app/Models/` |
 | `policy` | `app/Policies/` |
 | `dto` | `app/DTOs/`, `app/Dtos/`, `app/Data/` |
@@ -467,6 +470,9 @@ ACE uses heuristic-based analysis (regex + brace/parenthesis matching) to detect
 - Queue hygiene in jobs (`$tries`, `$timeout`, `failed()`, and uniqueness for critical jobs)
 - Heavy listeners without queue hints
 - Direct model access inside middleware
+- API Resource relation access without `whenLoaded` / `relationLoaded` guards
+- Fat/high-coupling traits and traits with direct model access
+- Contracts without explicit container binding (`bind`, `singleton`, `scoped`)
 - Authorization signals in Filament Pages/Widgets
 - Livewire locked properties
 - Test file existence per controller/service/model/job/middleware
@@ -508,6 +514,9 @@ ACE stores all artifacts in `.ace/`. Running `ace init` configures `.gitignore` 
       "fatModelLines": 320,
       "fatModelMethods": 15,
       "fatCommandLines": 260,
+      "fatTraitLines": 180,
+      "fatTraitMethods": 10,
+      "highTraitImports": 8,
       "fatFilamentResourceLines": 320,
       "fatFilamentResourceMethods": 12
     }
@@ -598,7 +607,7 @@ If you integrate ACE with scripts/CI bots, validate `schemaVersion` before parsi
 ```bash
 git clone https://github.com/hassekf/ace-engine.git
 cd ace
-npm test   # 34+ tests, fast feedback, no setup needed
+npm test   # 40+ tests, fast feedback, no setup needed
 ```
 
 Tests cover: analyzer heuristics, coverage computation, pattern inference, security baseline, state governance, scaffold initialization, module detection, MCP tool profiles, config management, decisions, learning bundles, and engine cache.
