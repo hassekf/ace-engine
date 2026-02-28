@@ -439,6 +439,23 @@ ACE classifies PHP files into kinds for targeted analysis:
 | `job` | `app/Jobs/` |
 | `listener` | `app/Listeners/` |
 | `middleware` | `app/Http/Middleware/` |
+| `helper` | `app/Helpers/`, `app/Utils/` |
+| `validator` | `app/Validators/`, `app/Rules/`, `app/Domain/*/Validators/` |
+| `value-object` | `app/ValueObjects/` |
+| `channel` | `app/Channels/` |
+| `mail` | `app/Mail/` or classes extending `Mailable` |
+| `logging` | `app/Logging/` |
+| `form-component` | `app/Forms/`, `app/Tables/` |
+| `scope` | `app/Scopes/` or scope classes/interfaces |
+| `kernel` | `app/Http/Kernel.php`, `app/Console/Kernel.php` |
+| `websocket` | `app/Websocket/` |
+| `filament-support` | `app/Filament/` files outside Resources/Pages/Widgets |
+| `broadcasting` | `app/Broadcasting/` |
+| `queue-support` | `app/Queue/` |
+| `provider` | `app/Providers/` or classes extending `ServiceProvider` |
+| `event` | `app/Events/` (and `*/Events/`) |
+| `observer` | `app/Observers/` or classes ending with `Observer` |
+| `notification` | `app/Notifications/` or classes extending `Notification` |
 | `trait` | `app/Traits/` |
 | `contract` | `app/Contracts/` or `App\\Contracts` interfaces |
 | `http-resource` | `app/Http/Resources/` or classes extending `JsonResource`/`ResourceCollection` |
@@ -470,6 +487,15 @@ ACE uses heuristic-based analysis (regex + brace/parenthesis matching) to detect
 - Queue hygiene in jobs (`$tries`, `$timeout`, `failed()`, and uniqueness for critical jobs)
 - Heavy listeners without queue hints
 - Direct model access inside middleware
+- Helpers with direct model access and oversized utility files
+- Validators without clear entrypoint (`validate/rules/passes`)
+- Mutable Value Objects (public mutable state/setters)
+- Mailables without queue and sensitive payload in mail/log channels
+- Scopes without `apply()` contract
+- Websocket components without clear auth/authz signals
+- Large providers and contract imports without container bindings
+- Domain/database logic inside events and observers
+- Notifications without queue and potential sensitive payloads
 - API Resource relation access without `whenLoaded` / `relationLoaded` guards
 - Fat/high-coupling traits and traits with direct model access
 - Contracts without explicit container binding (`bind`, `singleton`, `scoped`)
@@ -514,6 +540,13 @@ ACE stores all artifacts in `.ace/`. Running `ace init` configures `.gitignore` 
       "fatModelLines": 320,
       "fatModelMethods": 15,
       "fatCommandLines": 260,
+      "fatHelperLines": 220,
+      "fatValidatorLines": 220,
+      "fatFormComponentLines": 260,
+      "fatProviderLines": 280,
+      "fatEventLines": 140,
+      "fatObserverLines": 180,
+      "fatNotificationLines": 180,
       "fatTraitLines": 180,
       "fatTraitMethods": 10,
       "highTraitImports": 8,
@@ -607,7 +640,7 @@ If you integrate ACE with scripts/CI bots, validate `schemaVersion` before parsi
 ```bash
 git clone https://github.com/hassekf/ace-engine.git
 cd ace
-npm test   # 40+ tests, fast feedback, no setup needed
+npm test   # 42+ tests, fast feedback, no setup needed
 ```
 
 Tests cover: analyzer heuristics, coverage computation, pattern inference, security baseline, state governance, scaffold initialization, module detection, MCP tool profiles, config management, decisions, learning bundles, and engine cache.

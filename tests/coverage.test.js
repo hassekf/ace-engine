@@ -13,6 +13,32 @@ test('aggregateFromFileIndex sums metrics including new performance/integrity co
         unboundedGetCalls: 2,
         possibleNPlusOneRisks: 1,
         criticalWritesWithoutTransaction: 0,
+        helpers: 1,
+        helpersWithDirectModel: 1,
+        validators: 1,
+        validatorsWithoutEntrypoint: 1,
+        valueObjects: 1,
+        mutableValueObjects: 1,
+        mails: 1,
+        mailsWithoutQueue: 1,
+        loggingClasses: 1,
+        loggingWithSensitiveData: 1,
+        scopes: 1,
+        scopesWithoutApply: 1,
+        websocketClasses: 1,
+        websocketWithoutAuthSignals: 1,
+        filamentSupportFiles: 1,
+        broadcastingClasses: 1,
+        queueSupportClasses: 1,
+        providers: 1,
+        fatProviders: 1,
+        providersWithContractImportsWithoutBindings: 1,
+        events: 1,
+        eventsWithDirectModel: 1,
+        observers: 1,
+        observersWithDirectModel: 1,
+        notifications: 1,
+        notificationsWithoutQueue: 1,
         traits: 1,
         contracts: 1,
         contractsWithoutContainerBinding: 1,
@@ -32,6 +58,28 @@ test('aggregateFromFileIndex sums metrics including new performance/integrity co
         unboundedGetCalls: 1,
         possibleNPlusOneRisks: 0,
         criticalWritesWithoutTransaction: 1,
+        helpers: 0,
+        validators: 1,
+        fatValidators: 1,
+        valueObjects: 1,
+        mutableValueObjects: 0,
+        mails: 1,
+        mailsWithSensitiveData: 1,
+        loggingClasses: 1,
+        formComponents: 1,
+        fatFormComponents: 1,
+        scopes: 1,
+        kernels: 2,
+        websocketClasses: 0,
+        filamentSupportFiles: 1,
+        providers: 1,
+        providersWithContainerBindings: 1,
+        events: 1,
+        eventsWithDatabaseAccess: 1,
+        observers: 1,
+        fatObservers: 1,
+        notifications: 1,
+        notificationsWithSensitiveData: 1,
         traits: 0,
         contracts: 1,
         contractsWithContainerBinding: 1,
@@ -52,6 +100,41 @@ test('aggregateFromFileIndex sums metrics including new performance/integrity co
   assert.equal(payload.metrics.unboundedGetCalls, 3);
   assert.equal(payload.metrics.possibleNPlusOneRisks, 1);
   assert.equal(payload.metrics.criticalWritesWithoutTransaction, 1);
+  assert.equal(payload.metrics.helpers, 1);
+  assert.equal(payload.metrics.helpersWithDirectModel, 1);
+  assert.equal(payload.metrics.validators, 2);
+  assert.equal(payload.metrics.validatorsWithoutEntrypoint, 1);
+  assert.equal(payload.metrics.fatValidators, 1);
+  assert.equal(payload.metrics.valueObjects, 2);
+  assert.equal(payload.metrics.mutableValueObjects, 1);
+  assert.equal(payload.metrics.mails, 2);
+  assert.equal(payload.metrics.mailsWithoutQueue, 1);
+  assert.equal(payload.metrics.mailsWithSensitiveData, 1);
+  assert.equal(payload.metrics.loggingClasses, 2);
+  assert.equal(payload.metrics.loggingWithSensitiveData, 1);
+  assert.equal(payload.metrics.formComponents, 1);
+  assert.equal(payload.metrics.fatFormComponents, 1);
+  assert.equal(payload.metrics.scopes, 2);
+  assert.equal(payload.metrics.scopesWithoutApply, 1);
+  assert.equal(payload.metrics.kernels, 2);
+  assert.equal(payload.metrics.websocketClasses, 1);
+  assert.equal(payload.metrics.websocketWithoutAuthSignals, 1);
+  assert.equal(payload.metrics.filamentSupportFiles, 2);
+  assert.equal(payload.metrics.broadcastingClasses, 1);
+  assert.equal(payload.metrics.queueSupportClasses, 1);
+  assert.equal(payload.metrics.providers, 2);
+  assert.equal(payload.metrics.fatProviders, 1);
+  assert.equal(payload.metrics.providersWithContainerBindings, 1);
+  assert.equal(payload.metrics.providersWithContractImportsWithoutBindings, 1);
+  assert.equal(payload.metrics.events, 2);
+  assert.equal(payload.metrics.eventsWithDirectModel, 1);
+  assert.equal(payload.metrics.eventsWithDatabaseAccess, 1);
+  assert.equal(payload.metrics.observers, 2);
+  assert.equal(payload.metrics.fatObservers, 1);
+  assert.equal(payload.metrics.observersWithDirectModel, 1);
+  assert.equal(payload.metrics.notifications, 2);
+  assert.equal(payload.metrics.notificationsWithoutQueue, 1);
+  assert.equal(payload.metrics.notificationsWithSensitiveData, 1);
   assert.equal(payload.metrics.traits, 1);
   assert.equal(payload.metrics.contracts, 2);
   assert.equal(payload.metrics.contractsWithContainerBinding, 1);

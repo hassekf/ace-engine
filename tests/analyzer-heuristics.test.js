@@ -554,3 +554,424 @@ class CommunicationServiceProvider extends ServiceProvider
   assert.equal(contractEntry.metrics.contractsWithContainerBinding, 1);
   assert.equal(contractEntry.metrics.contractsWithoutContainerBinding, 0);
 });
+
+test('analyzer classifies provider, event, observer and notification kinds with dedicated checks', () => {
+  const root = makeTmpRoot();
+  const providerFile = path.join(root, 'app', 'Providers', 'CommunicationServiceProvider.php');
+  const eventFile = path.join(root, 'app', 'Events', 'BalanceRecomputed.php');
+  const observerFile = path.join(root, 'app', 'Observers', 'WalletObserver.php');
+  const notificationFile = path.join(root, 'app', 'Notifications', 'PasswordCodeNotification.php');
+
+  writePhp(
+    providerFile,
+    `<?php
+namespace App\\Providers;
+
+use App\\Contracts\\Communication\\SmsProviderInterface;
+use Illuminate\\Support\\ServiceProvider;
+
+class CommunicationServiceProvider extends ServiceProvider
+{
+    public function register(): void
+    {
+        // intentionally empty
+    }
+}
+`,
+  );
+
+  writePhp(
+    eventFile,
+    `<?php
+namespace App\\Events;
+
+use App\\Models\\User;
+use Illuminate\\Support\\Facades\\DB;
+
+class BalanceRecomputed
+{
+    public function recalculate(): void
+    {
+        User::query()->count();
+        DB::table('users')->update(['updated_at' => now()]);
+    }
+}
+`,
+  );
+
+  writePhp(
+    observerFile,
+    `<?php
+namespace App\\Observers;
+
+use App\\Models\\Wallet;
+
+class WalletObserver
+{
+    public function saved(Wallet $wallet): void
+    {
+        Wallet::query()->where('id', $wallet->id)->update(['updated_at' => now()]);
+    }
+}
+`,
+  );
+
+  writePhp(
+    notificationFile,
+    `<?php
+namespace App\\Notifications;
+
+use Illuminate\\Notifications\\Notification;
+use Illuminate\\Notifications\\Messages\\MailMessage;
+
+class PasswordCodeNotification extends Notification
+{
+    public function __construct(private string $code) {}
+
+    public function via($notifiable): array
+    {
+        return ['mail'];
+    }
+
+    public function toMail($notifiable): MailMessage
+    {
+        return (new MailMessage())->line('Code: '.$this->code);
+    }
+}
+`,
+  );
+
+  const payload = analyzeFiles({
+    root,
+    files: [providerFile, eventFile, observerFile, notificationFile],
+    testBasenames: new Set(),
+    thresholds: {
+      fatProviderLines: 8,
+      fatEventLines: 8,
+      fatObserverLines: 8,
+      fatNotificationLines: 8,
+    },
+  });
+
+  const providerEntry = payload['app/Providers/CommunicationServiceProvider.php'];
+  const eventEntry = payload['app/Events/BalanceRecomputed.php'];
+  const observerEntry = payload['app/Observers/WalletObserver.php'];
+  const notificationEntry = payload['app/Notifications/PasswordCodeNotification.php'];
+
+  assert.equal(providerEntry.kind, 'provider');
+  assert.equal(eventEntry.kind, 'event');
+  assert.equal(observerEntry.kind, 'observer');
+  assert.equal(notificationEntry.kind, 'notification');
+
+  assert.equal(providerEntry.metrics.providers, 1);
+  assert.equal(providerEntry.metrics.fatProviders, 1);
+  assert.equal(providerEntry.metrics.providersWithContractImportsWithoutBindings, 1);
+  const providerTypes = new Set((providerEntry.violations || []).map((item) => item.type));
+  assert.ok(providerTypes.has('fat-provider'));
+  assert.ok(providerTypes.has('provider-contract-import-without-binding'));
+
+  assert.equal(eventEntry.metrics.events, 1);
+  assert.equal(eventEntry.metrics.eventsWithDirectModel, 1);
+  assert.equal(eventEntry.metrics.eventsWithDatabaseAccess, 1);
+  const eventTypes = new Set((eventEntry.violations || []).map((item) => item.type));
+  assert.ok(eventTypes.has('event-direct-model'));
+  assert.ok(eventTypes.has('event-db-access'));
+
+  assert.equal(observerEntry.metrics.observers, 1);
+  assert.equal(observerEntry.metrics.observersWithDirectModel, 1);
+  const observerTypes = new Set((observerEntry.violations || []).map((item) => item.type));
+  assert.ok(observerTypes.has('observer-direct-model'));
+
+  assert.equal(notificationEntry.metrics.notifications, 1);
+  assert.equal(notificationEntry.metrics.notificationsWithoutQueue, 1);
+  assert.equal(notificationEntry.metrics.notificationsWithSensitiveData, 1);
+  const notificationTypes = new Set((notificationEntry.violations || []).map((item) => item.type));
+  assert.ok(notificationTypes.has('notification-without-queue'));
+  assert.ok(notificationTypes.has('notification-sensitive-payload'));
+});
+
+test('analyzer classifies remaining support kinds and detects key risks', () => {
+  const root = makeTmpRoot();
+  const helperFile = path.join(root, 'app', 'Helpers', 'WalletHelper.php');
+  const validatorFile = path.join(root, 'app', 'Validators', 'WalletValidator.php');
+  const valueObjectFile = path.join(root, 'app', 'ValueObjects', 'Money.php');
+  const channelFile = path.join(root, 'app', 'Channels', 'SmsChannel.php');
+  const mailFile = path.join(root, 'app', 'Mail', 'PasswordResetMail.php');
+  const loggingFile = path.join(root, 'app', 'Logging', 'AuditLogger.php');
+  const formFile = path.join(root, 'app', 'Forms', 'Components', 'BigForm.php');
+  const scopeFile = path.join(root, 'app', 'Scopes', 'CasinoScope.php');
+  const httpKernelFile = path.join(root, 'app', 'Http', 'Kernel.php');
+  const consoleKernelFile = path.join(root, 'app', 'Console', 'Kernel.php');
+  const websocketFile = path.join(root, 'app', 'Websocket', 'BetsSocket.php');
+  const filamentSupportFile = path.join(root, 'app', 'Filament', 'Admin', 'Themes', 'Lumos.php');
+  const broadcastingFile = path.join(root, 'app', 'Broadcasting', 'SecureBroadcastMiddleware.php');
+  const queueSupportFile = path.join(root, 'app', 'Queue', 'JobPayloadValidator.php');
+
+  writePhp(
+    helperFile,
+    `<?php
+namespace App\\Helpers;
+
+use App\\Models\\Wallet;
+
+class WalletHelper
+{
+    public static function touch(int $id): void
+    {
+        Wallet::query()->where('id', $id)->update(['updated_at' => now()]);
+    }
+}
+`,
+  );
+
+  writePhp(
+    validatorFile,
+    `<?php
+namespace App\\Validators;
+
+class WalletValidator
+{
+    public function message(): string
+    {
+        return 'invalid';
+    }
+}
+`,
+  );
+
+  writePhp(
+    valueObjectFile,
+    `<?php
+namespace App\\ValueObjects;
+
+class Money
+{
+    public int $amount;
+
+    public function setAmount(int $amount): void
+    {
+        $this->amount = $amount;
+    }
+}
+`,
+  );
+
+  writePhp(
+    channelFile,
+    `<?php
+namespace App\\Channels;
+
+class SmsChannel
+{
+    public function send($notifiable, $notification): void {}
+}
+`,
+  );
+
+  writePhp(
+    mailFile,
+    `<?php
+namespace App\\Mail;
+
+use Illuminate\\Mail\\Mailable;
+
+class PasswordResetMail extends Mailable
+{
+    public function __construct(private string $token) {}
+
+    public function build(): self
+    {
+        return $this->subject('Token: '.$this->token);
+    }
+}
+`,
+  );
+
+  writePhp(
+    loggingFile,
+    `<?php
+namespace App\\Logging;
+
+use Illuminate\\Support\\Facades\\Log;
+
+class AuditLogger
+{
+    public function write(string $token): void
+    {
+        Log::info('token='.$token);
+    }
+}
+`,
+  );
+
+  writePhp(
+    formFile,
+    `<?php
+namespace App\\Forms\\Components;
+
+class BigForm
+{
+    public function render(): array
+    {
+        return [
+            'a' => 1,
+            'b' => 2,
+            'c' => 3,
+            'd' => 4,
+            'e' => 5,
+            'f' => 6,
+            'g' => 7,
+            'h' => 8,
+            'i' => 9,
+            'j' => 10,
+        ];
+    }
+}
+`,
+  );
+
+  writePhp(
+    scopeFile,
+    `<?php
+namespace App\\Scopes;
+
+class CasinoScope
+{
+    public function handle(): void {}
+}
+`,
+  );
+
+  writePhp(
+    httpKernelFile,
+    `<?php
+namespace App\\Http;
+
+class Kernel {}
+`,
+  );
+
+  writePhp(
+    consoleKernelFile,
+    `<?php
+namespace App\\Console;
+
+class Kernel {}
+`,
+  );
+
+  writePhp(
+    websocketFile,
+    `<?php
+namespace App\\Websocket;
+
+class BetsSocket
+{
+    public function connect(): void {}
+}
+`,
+  );
+
+  writePhp(
+    filamentSupportFile,
+    `<?php
+namespace App\\Filament\\Admin\\Themes;
+
+class Lumos {}
+`,
+  );
+
+  writePhp(
+    broadcastingFile,
+    `<?php
+namespace App\\Broadcasting;
+
+class SecureBroadcastMiddleware
+{
+    public function handle($request, $next)
+    {
+        return $next($request);
+    }
+}
+`,
+  );
+
+  writePhp(
+    queueSupportFile,
+    `<?php
+namespace App\\Queue;
+
+class JobPayloadValidator
+{
+    public function validate(array $payload): bool
+    {
+        return true;
+    }
+}
+`,
+  );
+
+  const payload = analyzeFiles({
+    root,
+    files: [
+      helperFile,
+      validatorFile,
+      valueObjectFile,
+      channelFile,
+      mailFile,
+      loggingFile,
+      formFile,
+      scopeFile,
+      httpKernelFile,
+      consoleKernelFile,
+      websocketFile,
+      filamentSupportFile,
+      broadcastingFile,
+      queueSupportFile,
+    ],
+    testBasenames: new Set(),
+    thresholds: {
+      fatFormComponentLines: 10,
+    },
+  });
+
+  assert.equal(payload['app/Helpers/WalletHelper.php'].kind, 'helper');
+  assert.equal(payload['app/Validators/WalletValidator.php'].kind, 'validator');
+  assert.equal(payload['app/ValueObjects/Money.php'].kind, 'value-object');
+  assert.equal(payload['app/Channels/SmsChannel.php'].kind, 'channel');
+  assert.equal(payload['app/Mail/PasswordResetMail.php'].kind, 'mail');
+  assert.equal(payload['app/Logging/AuditLogger.php'].kind, 'logging');
+  assert.equal(payload['app/Forms/Components/BigForm.php'].kind, 'form-component');
+  assert.equal(payload['app/Scopes/CasinoScope.php'].kind, 'scope');
+  assert.equal(payload['app/Http/Kernel.php'].kind, 'kernel');
+  assert.equal(payload['app/Console/Kernel.php'].kind, 'kernel');
+  assert.equal(payload['app/Websocket/BetsSocket.php'].kind, 'websocket');
+  assert.equal(payload['app/Filament/Admin/Themes/Lumos.php'].kind, 'filament-support');
+  assert.equal(payload['app/Broadcasting/SecureBroadcastMiddleware.php'].kind, 'broadcasting');
+  assert.equal(payload['app/Queue/JobPayloadValidator.php'].kind, 'queue-support');
+
+  const helperTypes = new Set((payload['app/Helpers/WalletHelper.php'].violations || []).map((item) => item.type));
+  assert.ok(helperTypes.has('helper-direct-model'));
+
+  const validatorTypes = new Set((payload['app/Validators/WalletValidator.php'].violations || []).map((item) => item.type));
+  assert.ok(validatorTypes.has('validator-without-entrypoint'));
+
+  const valueObjectTypes = new Set((payload['app/ValueObjects/Money.php'].violations || []).map((item) => item.type));
+  assert.ok(valueObjectTypes.has('mutable-value-object'));
+
+  const mailTypes = new Set((payload['app/Mail/PasswordResetMail.php'].violations || []).map((item) => item.type));
+  assert.ok(mailTypes.has('mail-without-queue'));
+  assert.ok(mailTypes.has('mail-sensitive-payload'));
+
+  const loggingTypes = new Set((payload['app/Logging/AuditLogger.php'].violations || []).map((item) => item.type));
+  assert.ok(loggingTypes.has('logging-sensitive-data'));
+
+  const formTypes = new Set((payload['app/Forms/Components/BigForm.php'].violations || []).map((item) => item.type));
+  assert.ok(formTypes.has('fat-form-component'));
+
+  const scopeTypes = new Set((payload['app/Scopes/CasinoScope.php'].violations || []).map((item) => item.type));
+  assert.ok(scopeTypes.has('scope-without-apply'));
+
+  const websocketTypes = new Set((payload['app/Websocket/BetsSocket.php'].violations || []).map((item) => item.type));
+  assert.ok(websocketTypes.has('websocket-without-auth-signal'));
+});

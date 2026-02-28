@@ -2,7 +2,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { lineFromIndex, normalizePath, slugify } = require('./helpers');
 
-const ANALYZER_VERSION = 13;
+const ANALYZER_VERSION = 15;
 
 function createMetrics() {
   return {
@@ -28,6 +28,46 @@ function createMetrics() {
     middlewares: 0,
     fatMiddlewares: 0,
     middlewaresWithDirectModel: 0,
+    helpers: 0,
+    fatHelpers: 0,
+    helpersWithDirectModel: 0,
+    validators: 0,
+    fatValidators: 0,
+    validatorsWithoutEntrypoint: 0,
+    exceptions: 0,
+    valueObjects: 0,
+    mutableValueObjects: 0,
+    channels: 0,
+    mails: 0,
+    mailsWithoutQueue: 0,
+    mailsWithSensitiveData: 0,
+    loggingClasses: 0,
+    loggingWithSensitiveData: 0,
+    formComponents: 0,
+    fatFormComponents: 0,
+    scopes: 0,
+    scopesWithoutApply: 0,
+    kernels: 0,
+    websocketClasses: 0,
+    websocketWithoutAuthSignals: 0,
+    filamentSupportFiles: 0,
+    broadcastingClasses: 0,
+    queueSupportClasses: 0,
+    providers: 0,
+    fatProviders: 0,
+    providersWithContainerBindings: 0,
+    providersWithContractImportsWithoutBindings: 0,
+    events: 0,
+    fatEvents: 0,
+    eventsWithDirectModel: 0,
+    eventsWithDatabaseAccess: 0,
+    observers: 0,
+    fatObservers: 0,
+    observersWithDirectModel: 0,
+    notifications: 0,
+    fatNotifications: 0,
+    notificationsWithoutQueue: 0,
+    notificationsWithSensitiveData: 0,
     traits: 0,
     fatTraits: 0,
     highCouplingTraits: 0,
@@ -168,6 +208,74 @@ function detectKind(relativePath, content) {
     return 'middleware';
   }
 
+  if (normalized.includes('/Helpers/') || normalized.includes('/Utils/')) {
+    return 'helper';
+  }
+
+  if (normalized.includes('/Validators/') || normalized.includes('/Rules/') || /\/Domain\/.+\/Validators\//.test(normalized)) {
+    return 'validator';
+  }
+
+  if (normalized.includes('/Exceptions/')) {
+    return 'exception';
+  }
+
+  if (normalized.includes('/ValueObjects/')) {
+    return 'value-object';
+  }
+
+  if (normalized.includes('/Channels/')) {
+    return 'channel';
+  }
+
+  if (normalized.includes('/Mail/')) {
+    return 'mail';
+  }
+
+  if (normalized.includes('/Logging/')) {
+    return 'logging';
+  }
+
+  if (normalized.includes('/Forms/') || normalized.includes('/Tables/')) {
+    return 'form-component';
+  }
+
+  if (normalized.includes('/Scopes/')) {
+    return 'scope';
+  }
+
+  if (normalized === 'app/Http/Kernel.php' || normalized === 'app/Console/Kernel.php') {
+    return 'kernel';
+  }
+
+  if (normalized.includes('/Websocket/')) {
+    return 'websocket';
+  }
+
+  if (normalized.includes('/Broadcasting/')) {
+    return 'broadcasting';
+  }
+
+  if (normalized.includes('/Queue/')) {
+    return 'queue-support';
+  }
+
+  if (normalized.includes('/Providers/')) {
+    return 'provider';
+  }
+
+  if (normalized.includes('/Events/')) {
+    return 'event';
+  }
+
+  if (normalized.includes('/Observers/')) {
+    return 'observer';
+  }
+
+  if (normalized.includes('/Notifications/')) {
+    return 'notification';
+  }
+
   if (normalized.includes('/Traits/')) {
     return 'trait';
   }
@@ -190,6 +298,10 @@ function detectKind(relativePath, content) {
 
   if (normalized.includes('/Filament/') && normalized.includes('/Widgets/')) {
     return 'filament-widget';
+  }
+
+  if (normalized.includes('/Filament/')) {
+    return 'filament-support';
   }
 
   if (normalized.includes('/Livewire/')) {
@@ -232,8 +344,36 @@ function detectKind(relativePath, content) {
     return 'command';
   }
 
+  if (/extends\s+[A-Za-z0-9_\\]*Exception\b/.test(content) || /implements\s+[^{\n]*Throwable\b/.test(content)) {
+    return 'exception';
+  }
+
+  if (/extends\s+[A-Za-z0-9_\\]*Mailable\b/.test(content)) {
+    return 'mail';
+  }
+
+  if (/class\s+[A-Za-z0-9_]+Validator\b/.test(content)) {
+    return 'validator';
+  }
+
+  if (/class\s+[A-Za-z0-9_]+Observer\b/.test(content)) {
+    return 'observer';
+  }
+
+  if (/class\s+[A-Za-z0-9_]+Scope\b/.test(content) || /implements\s+[^{\n]*Scope\b/.test(content)) {
+    return 'scope';
+  }
+
+  if (/extends\s+ServiceProvider\b/.test(content)) {
+    return 'provider';
+  }
+
   if (/implements\s+[^{\n]*ShouldQueue\b/.test(content) && /class\s+[A-Za-z0-9_]+(?:Job|Listener)\b/.test(content)) {
     return /Listener\b/.test(content) ? 'listener' : 'job';
+  }
+
+  if (/extends\s+Notification\b/.test(content)) {
+    return 'notification';
   }
 
   if (/extends\s+Resource\b/.test(content)) {
@@ -305,6 +445,41 @@ function collectModelStaticCalls(content, modelAliases) {
     });
   }
   return calls;
+}
+
+function hasContainerBindingSignal(content) {
+  return (
+    /\b(?:\$this->app|app\s*\(\s*\))->(?:bind|singleton|scoped)\s*\(/.test(content) ||
+    /\b(?:bind|singleton|scoped)\s*\(\s*[A-Za-z0-9_\\]+Interface::class\s*,/.test(content)
+  );
+}
+
+function hasDbFacadeAccess(content) {
+  return /\bDB::(?:table|select|selectRaw|insert|update|delete|statement|raw)\s*\(/.test(content);
+}
+
+function hasNotificationSensitivePayload(content) {
+  const hasPayloadSurface = /\bfunction\s+(?:toMail|toArray|toDatabase|toBroadcast)\s*\(/.test(content);
+  if (!hasPayloadSurface) {
+    return false;
+  }
+
+  return /\$this->(?:password|secret|token|apiKey|accessToken|refreshToken|otp|code)\b/i.test(content);
+}
+
+function hasMailSensitivePayload(content) {
+  const hasPayloadSurface = /\bfunction\s+(?:build|content|envelope|toMail)\s*\(/.test(content);
+  if (!hasPayloadSurface) {
+    return false;
+  }
+
+  return /\$this->(?:password|secret|token|apiKey|accessToken|refreshToken|otp|code)\b/i.test(content);
+}
+
+function hasLogSensitivePayload(content) {
+  return /\bLog::(?:debug|info|notice|warning|error|critical|alert|emergency)\s*\([\s\S]{0,240}?(?:password|secret|token|api[_-]?key|authorization)/i.test(
+    content,
+  );
 }
 
 function listPhpFilesRecursive(rootDir) {
@@ -1249,6 +1424,469 @@ function analyzeMiddleware({ relativePath, content, metrics, signals, violations
   analyzeDynamicRawSql({ relativePath, content, metrics, signals, violations });
 }
 
+function analyzeHelper({ relativePath, content, metrics, signals, violations, thresholds }) {
+  metrics.helpers = 1;
+  signals.fileLineCount = content.split('\n').length;
+  signals.methodCount = extractFunctionBlocks(content).length;
+
+  if (signals.fileLineCount > threshold(thresholds, 'fatHelperLines', 220)) {
+    metrics.fatHelpers = 1;
+    violations.push(
+      createViolation({
+        type: 'fat-helper',
+        severity: 'low',
+        file: relativePath,
+        line: 1,
+        message: `Helper com ${signals.fileLineCount} linhas`,
+        rationale: 'Helpers extensos tendem a virar utilitários genéricos difíceis de testar/manter.',
+        suggestion: 'Quebre o helper por contexto de domínio ou extraia para services dedicados.',
+      }),
+    );
+  }
+
+  const modelAliases = collectImportedModelAliases(content);
+  const modelCalls = collectModelStaticCalls(content, modelAliases);
+  if (modelCalls.length > 0) {
+    metrics.helpersWithDirectModel = 1;
+    violations.push(
+      createViolation({
+        type: 'helper-direct-model',
+        severity: 'medium',
+        file: relativePath,
+        line: modelCalls[0].line,
+        message: 'Helper com acesso direto a Model detectado',
+        rationale: 'Helpers com acesso direto a Model aumentam acoplamento transversal e ocultam dependências.',
+        suggestion: 'Prefira services/use cases com dependências explícitas em vez de helper global com acesso a dados.',
+      }),
+    );
+  }
+
+  analyzeDynamicRawSql({ relativePath, content, metrics, signals, violations });
+}
+
+function analyzeValidator({ relativePath, content, metrics, signals, violations, thresholds }) {
+  metrics.validators = 1;
+  signals.fileLineCount = content.split('\n').length;
+  signals.methodCount = extractFunctionBlocks(content).length;
+
+  if (signals.fileLineCount > threshold(thresholds, 'fatValidatorLines', 220)) {
+    metrics.fatValidators = 1;
+    violations.push(
+      createViolation({
+        type: 'fat-validator',
+        severity: 'low',
+        file: relativePath,
+        line: 1,
+        message: `Validator com ${signals.fileLineCount} linhas`,
+        rationale: 'Validators extensos tendem a misturar regra de validação com fluxo de negócio.',
+        suggestion: 'Divida validações por contexto e mantenha contratos de validação objetivos.',
+      }),
+    );
+  }
+
+  const hasEntrypoint = /\bfunction\s+(?:validate|rules|passes)\s*\(/.test(content);
+  if (!hasEntrypoint && /\b(?:class|interface)\s+[A-Za-z0-9_]*Validator\b/.test(content)) {
+    metrics.validatorsWithoutEntrypoint = 1;
+    violations.push(
+      createViolation({
+        type: 'validator-without-entrypoint',
+        severity: 'low',
+        file: relativePath,
+        line: 1,
+        message: 'Validator sem método de entrada esperado detectado',
+        rationale: 'Sem entrypoint claro (`validate/rules/passes`) o contrato do validator fica ambíguo.',
+        suggestion: 'Defina método de entrada explícito para manter previsibilidade de uso.',
+      }),
+    );
+  }
+}
+
+function analyzeException({ content, metrics, signals }) {
+  metrics.exceptions = 1;
+  signals.fileLineCount = content.split('\n').length;
+  signals.methodCount = extractFunctionBlocks(content).length;
+}
+
+function analyzeValueObject({ relativePath, content, metrics, signals, violations }) {
+  metrics.valueObjects = 1;
+  signals.fileLineCount = content.split('\n').length;
+  signals.methodCount = extractFunctionBlocks(content).length;
+
+  const hasMutablePublicProperty = /\bpublic\s+(?!readonly\b)(?:static\s+)?(?:\??[A-Za-z0-9_\\|]+\s+)?\$[A-Za-z_][A-Za-z0-9_]*\s*[;=]/.test(
+    content,
+  );
+  const hasSetter = /\bfunction\s+set[A-Z][A-Za-z0-9_]*\s*\(/.test(content);
+
+  if (hasMutablePublicProperty || hasSetter) {
+    metrics.mutableValueObjects = 1;
+    violations.push(
+      createViolation({
+        type: 'mutable-value-object',
+        severity: 'low',
+        file: relativePath,
+        line: 1,
+        message: 'Value Object com sinais de mutabilidade detectado',
+        rationale: 'Value Objects mutáveis reduzem previsibilidade e dificultam consistência de estado.',
+        suggestion: 'Prefira Value Objects imutáveis (`readonly`) e construção por construtor/factory.',
+      }),
+    );
+  }
+}
+
+function analyzeChannel({ content, metrics, signals }) {
+  metrics.channels = 1;
+  signals.fileLineCount = content.split('\n').length;
+  signals.methodCount = extractFunctionBlocks(content).length;
+}
+
+function analyzeMail({ relativePath, content, metrics, signals, violations }) {
+  metrics.mails = 1;
+  signals.fileLineCount = content.split('\n').length;
+  signals.methodCount = extractFunctionBlocks(content).length;
+
+  const isMailable = /\bextends\s+[A-Za-z0-9_\\]*Mailable\b/.test(content);
+  const isQueued = /implements\s+[^{\n]*ShouldQueue\b/.test(content);
+  if (isMailable && !isQueued) {
+    metrics.mailsWithoutQueue = 1;
+    violations.push(
+      createViolation({
+        type: 'mail-without-queue',
+        severity: 'low',
+        file: relativePath,
+        line: 1,
+        message: 'Mailable sem `ShouldQueue` detectado',
+        rationale: 'Envio síncrono de mail pode aumentar latência e risco de timeout em fluxos com volume.',
+        suggestion: 'Avalie `ShouldQueue` para mailables de custo/volume relevante.',
+      }),
+    );
+  }
+
+  if (hasMailSensitivePayload(content)) {
+    metrics.mailsWithSensitiveData = 1;
+    violations.push(
+      createViolation({
+        type: 'mail-sensitive-payload',
+        severity: 'medium',
+        file: relativePath,
+        line: 1,
+        message: 'Mailable com possível payload sensível detectado',
+        rationale: 'Dados sensíveis em e-mail aumentam risco de exposição involuntária.',
+        suggestion: 'Minimize dados sensíveis no mail e prefira links one-time/token curto com expiração.',
+      }),
+    );
+  }
+}
+
+function analyzeLogging({ relativePath, content, metrics, signals, violations }) {
+  metrics.loggingClasses = 1;
+  signals.fileLineCount = content.split('\n').length;
+  signals.methodCount = extractFunctionBlocks(content).length;
+
+  if (hasLogSensitivePayload(content)) {
+    metrics.loggingWithSensitiveData = 1;
+    violations.push(
+      createViolation({
+        type: 'logging-sensitive-data',
+        severity: 'medium',
+        file: relativePath,
+        line: 1,
+        message: 'Possível log de dado sensível detectado',
+        rationale: 'Logs com secrets/tokens/passwords ampliam risco de vazamento e compliance.',
+        suggestion: 'Mascare/redija dados sensíveis antes de logar e restrinja nível/escopo de logs.',
+      }),
+    );
+  }
+}
+
+function analyzeFormComponent({ relativePath, content, metrics, signals, violations, thresholds }) {
+  metrics.formComponents = 1;
+  signals.fileLineCount = content.split('\n').length;
+  signals.methodCount = extractFunctionBlocks(content).length;
+
+  if (signals.fileLineCount > threshold(thresholds, 'fatFormComponentLines', 260)) {
+    metrics.fatFormComponents = 1;
+    violations.push(
+      createViolation({
+        type: 'fat-form-component',
+        severity: 'low',
+        file: relativePath,
+        line: 1,
+        message: `Form component com ${signals.fileLineCount} linhas`,
+        rationale: 'Componentes de formulário extensos tendem a concentrar UI + regra de negócio.',
+        suggestion: 'Extraia regra de negócio para services/validators e mantenha componente focado em UI.',
+      }),
+    );
+  }
+}
+
+function analyzeScope({ relativePath, content, metrics, signals, violations }) {
+  metrics.scopes = 1;
+  signals.fileLineCount = content.split('\n').length;
+  signals.methodCount = extractFunctionBlocks(content).length;
+
+  if (!/\bfunction\s+apply\s*\(/.test(content)) {
+    metrics.scopesWithoutApply = 1;
+    violations.push(
+      createViolation({
+        type: 'scope-without-apply',
+        severity: 'low',
+        file: relativePath,
+        line: 1,
+        message: 'Scope sem método `apply()` detectado',
+        rationale: 'Sem `apply()`, o contrato esperado de scope do Eloquent fica incompleto/ambíguo.',
+        suggestion: 'Implemente `apply(Builder $builder, Model $model)` para manter contrato do scope.',
+      }),
+    );
+  }
+}
+
+function analyzeKernel({ content, metrics, signals }) {
+  metrics.kernels = 1;
+  signals.fileLineCount = content.split('\n').length;
+  signals.methodCount = extractFunctionBlocks(content).length;
+}
+
+function analyzeWebsocket({ relativePath, content, metrics, signals, violations }) {
+  metrics.websocketClasses = 1;
+  signals.fileLineCount = content.split('\n').length;
+  signals.methodCount = extractFunctionBlocks(content).length;
+
+  const hasAuthSignal = /\b(?:auth|authorize|can|gate|token|signature|verify)\b/i.test(content);
+  if (!hasAuthSignal) {
+    metrics.websocketWithoutAuthSignals = 1;
+    violations.push(
+      createViolation({
+        type: 'websocket-without-auth-signal',
+        severity: 'low',
+        file: relativePath,
+        line: 1,
+        message: 'Componente websocket sem sinal claro de autenticação/autorização',
+        rationale: 'Fluxos websocket sem controles explícitos elevam risco de acesso indevido a eventos/dados.',
+        suggestion: 'Inclua autenticação/autorização explícita no handshake/canal e validação de escopo.',
+      }),
+    );
+  }
+}
+
+function analyzeFilamentSupport({ content, metrics, signals }) {
+  metrics.filamentSupportFiles = 1;
+  signals.fileLineCount = content.split('\n').length;
+  signals.methodCount = extractFunctionBlocks(content).length;
+}
+
+function analyzeBroadcasting({ content, metrics, signals }) {
+  metrics.broadcastingClasses = 1;
+  signals.fileLineCount = content.split('\n').length;
+  signals.methodCount = extractFunctionBlocks(content).length;
+}
+
+function analyzeQueueSupport({ content, metrics, signals }) {
+  metrics.queueSupportClasses = 1;
+  signals.fileLineCount = content.split('\n').length;
+  signals.methodCount = extractFunctionBlocks(content).length;
+}
+
+function analyzeProvider({ relativePath, content, metrics, signals, violations, thresholds }) {
+  metrics.providers = 1;
+  signals.fileLineCount = content.split('\n').length;
+  signals.methodCount = extractFunctionBlocks(content).length;
+
+  if (signals.fileLineCount > threshold(thresholds, 'fatProviderLines', 280)) {
+    metrics.fatProviders = 1;
+    violations.push(
+      createViolation({
+        type: 'fat-provider',
+        severity: 'low',
+        file: relativePath,
+        line: 1,
+        message: `Provider com ${signals.fileLineCount} linhas`,
+        rationale: 'Providers extensos tendem a acumular responsabilidades de bootstrap e DI.',
+        suggestion: 'Extraia bootstrapping por domínio e mantenha providers focados.',
+      }),
+    );
+  }
+
+  const hasBinding = hasContainerBindingSignal(content);
+  if (hasBinding) {
+    metrics.providersWithContainerBindings = 1;
+  }
+
+  const contractImports = collectImports(content).filter((item) => item.fqcn.startsWith('App\\Contracts\\'));
+  if (contractImports.length > 0 && !hasBinding) {
+    metrics.providersWithContractImportsWithoutBindings = 1;
+    violations.push(
+      createViolation({
+        type: 'provider-contract-import-without-binding',
+        severity: 'low',
+        file: relativePath,
+        line: 1,
+        message: 'Provider importa Contracts sem sinal de binding no container',
+        rationale: 'Contracts sem bind explícito no provider podem quebrar resolução previsível de dependências.',
+        suggestion: 'Registre bindings com bind/singleton/scoped para os contracts importados.',
+      }),
+    );
+  }
+}
+
+function analyzeEvent({ relativePath, content, metrics, signals, violations, thresholds }) {
+  metrics.events = 1;
+  signals.fileLineCount = content.split('\n').length;
+  signals.methodCount = extractFunctionBlocks(content).length;
+
+  if (signals.fileLineCount > threshold(thresholds, 'fatEventLines', 140)) {
+    metrics.fatEvents = 1;
+    violations.push(
+      createViolation({
+        type: 'fat-event',
+        severity: 'low',
+        file: relativePath,
+        line: 1,
+        message: `Event com ${signals.fileLineCount} linhas`,
+        rationale: 'Events devem ser payloads simples; lógica pesada aumenta acoplamento e side-effects implícitos.',
+        suggestion: 'Mantenha events enxutos e mova regra para listeners/services.',
+      }),
+    );
+  }
+
+  const modelAliases = collectImportedModelAliases(content);
+  const modelCalls = collectModelStaticCalls(content, modelAliases);
+  if (modelCalls.length > 0) {
+    metrics.eventsWithDirectModel = 1;
+    violations.push(
+      createViolation({
+        type: 'event-direct-model',
+        severity: 'medium',
+        file: relativePath,
+        line: modelCalls[0].line,
+        message: 'Event com acesso direto a Model detectado',
+        rationale: 'Events com acesso a Model sugerem mistura de payload com regra de negócio.',
+        suggestion: 'Mova consultas/escritas para listener/service e mantenha Event como contrato de dados.',
+      }),
+    );
+  }
+
+  if (hasDbFacadeAccess(content)) {
+    metrics.eventsWithDatabaseAccess = 1;
+    violations.push(
+      createViolation({
+        type: 'event-db-access',
+        severity: 'medium',
+        file: relativePath,
+        line: 1,
+        message: 'Event com acesso direto a DB detectado',
+        rationale: 'Acesso direto a DB em Event aumenta side-effects ocultos e dificulta previsibilidade.',
+        suggestion: 'Mova acesso a DB para listener/service e mantenha Event apenas como payload.',
+      }),
+    );
+  }
+
+  analyzeDynamicRawSql({ relativePath, content, metrics, signals, violations });
+}
+
+function analyzeObserver({ relativePath, content, metrics, signals, violations, thresholds }) {
+  metrics.observers = 1;
+  signals.fileLineCount = content.split('\n').length;
+  signals.methodCount = extractFunctionBlocks(content).length;
+
+  if (signals.fileLineCount > threshold(thresholds, 'fatObserverLines', 180)) {
+    metrics.fatObservers = 1;
+    violations.push(
+      createViolation({
+        type: 'fat-observer',
+        severity: 'low',
+        file: relativePath,
+        line: 1,
+        message: `Observer com ${signals.fileLineCount} linhas`,
+        rationale: 'Observers extensos tendem a concentrar side-effects e dificultam rastreabilidade.',
+        suggestion: 'Extraia side-effects complexos para services/listeners especializados.',
+      }),
+    );
+  }
+
+  const modelAliases = collectImportedModelAliases(content);
+  const modelCalls = collectModelStaticCalls(content, modelAliases);
+  if (modelCalls.length > 0) {
+    metrics.observersWithDirectModel = 1;
+    violations.push(
+      createViolation({
+        type: 'observer-direct-model',
+        severity: 'low',
+        file: relativePath,
+        line: modelCalls[0].line,
+        message: 'Observer com acesso direto a Model detectado',
+        rationale: 'Observers com consultas/escritas diretas tendem a gerar dependências ocultas no lifecycle do Model.',
+        suggestion: 'Delegue operações complexas para services e mantenha observer focado em orquestração mínima.',
+      }),
+    );
+  }
+
+  analyzeDynamicRawSql({ relativePath, content, metrics, signals, violations });
+  analyzeQueryDiscipline({
+    relativePath,
+    content,
+    metrics,
+    signals,
+    violations,
+    sourceKind: 'service',
+  });
+  analyzeCriticalWriteTransaction({ relativePath, content, metrics, signals, violations });
+}
+
+function analyzeNotification({ relativePath, content, metrics, signals, violations, thresholds }) {
+  metrics.notifications = 1;
+  signals.fileLineCount = content.split('\n').length;
+  signals.methodCount = extractFunctionBlocks(content).length;
+
+  if (signals.fileLineCount > threshold(thresholds, 'fatNotificationLines', 180)) {
+    metrics.fatNotifications = 1;
+    violations.push(
+      createViolation({
+        type: 'fat-notification',
+        severity: 'low',
+        file: relativePath,
+        line: 1,
+        message: `Notification com ${signals.fileLineCount} linhas`,
+        rationale: 'Notifications extensas podem misturar composição de conteúdo com regra de negócio.',
+        suggestion: 'Mantenha Notification enxuta e extraia composição complexa para services/mappers.',
+      }),
+    );
+  }
+
+  const hasDeliveryMethods = /\bfunction\s+(?:via|toMail|toArray|toDatabase|toBroadcast)\s*\(/.test(content);
+  const isQueuedNotification = /implements\s+[^{\n]*ShouldQueue\b/.test(content);
+  if (hasDeliveryMethods && !isQueuedNotification) {
+    metrics.notificationsWithoutQueue = 1;
+    violations.push(
+      createViolation({
+        type: 'notification-without-queue',
+        severity: 'low',
+        file: relativePath,
+        line: 1,
+        message: 'Notification sem `ShouldQueue` detectada',
+        rationale: 'Em fluxos de volume, envio síncrono de notifications pode aumentar latência de resposta.',
+        suggestion: 'Avalie implementar `ShouldQueue` para notificações custosas ou de alto volume.',
+      }),
+    );
+  }
+
+  if (hasNotificationSensitivePayload(content)) {
+    metrics.notificationsWithSensitiveData = 1;
+    violations.push(
+      createViolation({
+        type: 'notification-sensitive-payload',
+        severity: 'medium',
+        file: relativePath,
+        line: 1,
+        message: 'Notification com possível payload sensível detectado',
+        rationale: 'Exposição de dados sensíveis em canais de notification aumenta risco de vazamento.',
+        suggestion: 'Minimize payload sensível e use tokens curtos/one-time com expiração e masking.',
+      }),
+    );
+  }
+
+  analyzeDynamicRawSql({ relativePath, content, metrics, signals, violations });
+}
+
 function analyzeTrait({ relativePath, content, metrics, signals, violations, thresholds }) {
   metrics.traits = 1;
   signals.fileLineCount = content.split('\n').length;
@@ -1702,6 +2340,42 @@ function analyzePhpFile({ relativePath, absolutePath, content, testBasenames, th
     analyzeListener({ relativePath, content, metrics, signals, violations, testBasenames });
   } else if (kind === 'middleware') {
     analyzeMiddleware({ relativePath, content, metrics, signals, violations, testBasenames, thresholds });
+  } else if (kind === 'helper') {
+    analyzeHelper({ relativePath, content, metrics, signals, violations, thresholds });
+  } else if (kind === 'validator') {
+    analyzeValidator({ relativePath, content, metrics, signals, violations, thresholds });
+  } else if (kind === 'exception') {
+    analyzeException({ content, metrics, signals });
+  } else if (kind === 'value-object') {
+    analyzeValueObject({ relativePath, content, metrics, signals, violations });
+  } else if (kind === 'channel') {
+    analyzeChannel({ content, metrics, signals });
+  } else if (kind === 'mail') {
+    analyzeMail({ relativePath, content, metrics, signals, violations });
+  } else if (kind === 'logging') {
+    analyzeLogging({ relativePath, content, metrics, signals, violations });
+  } else if (kind === 'form-component') {
+    analyzeFormComponent({ relativePath, content, metrics, signals, violations, thresholds });
+  } else if (kind === 'scope') {
+    analyzeScope({ relativePath, content, metrics, signals, violations });
+  } else if (kind === 'kernel') {
+    analyzeKernel({ content, metrics, signals });
+  } else if (kind === 'websocket') {
+    analyzeWebsocket({ relativePath, content, metrics, signals, violations });
+  } else if (kind === 'filament-support') {
+    analyzeFilamentSupport({ content, metrics, signals });
+  } else if (kind === 'broadcasting') {
+    analyzeBroadcasting({ content, metrics, signals });
+  } else if (kind === 'queue-support') {
+    analyzeQueueSupport({ content, metrics, signals });
+  } else if (kind === 'provider') {
+    analyzeProvider({ relativePath, content, metrics, signals, violations, thresholds });
+  } else if (kind === 'event') {
+    analyzeEvent({ relativePath, content, metrics, signals, violations, thresholds });
+  } else if (kind === 'observer') {
+    analyzeObserver({ relativePath, content, metrics, signals, violations, thresholds });
+  } else if (kind === 'notification') {
+    analyzeNotification({ relativePath, content, metrics, signals, violations, thresholds });
   } else if (kind === 'trait') {
     analyzeTrait({ relativePath, content, metrics, signals, violations, thresholds });
   } else if (kind === 'contract') {

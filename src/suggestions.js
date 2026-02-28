@@ -203,6 +203,142 @@ function buildSuggestions({ metrics, coverage, model, violations, security = nul
     );
   }
 
+  if ((metrics.helpersWithDirectModel || 0) > 0) {
+    suggestions.push(
+      createSuggestion({
+        category: 'architecture',
+        title: 'Evitar acesso direto a Model em Helpers',
+        details:
+          'Há helpers com acesso direto a Model. Isso aumenta acoplamento global e dificulta teste/manutenção de fluxo de negócio.',
+        impact: 'medium',
+        effort: 'medium',
+      }),
+    );
+  }
+
+  if ((metrics.mutableValueObjects || 0) > 0) {
+    suggestions.push(
+      createSuggestion({
+        category: 'clean-code',
+        title: 'Tornar Value Objects imutáveis',
+        details:
+          'Foram detectados Value Objects com sinais de mutabilidade. Padronize `readonly`/construtor/factory para previsibilidade e segurança de estado.',
+        impact: 'medium',
+        effort: 'low',
+      }),
+    );
+  }
+
+  if ((metrics.mailsWithoutQueue || 0) > 0) {
+    suggestions.push(
+      createSuggestion({
+        category: 'reliability',
+        title: 'Avaliar queue para Mailables de maior custo',
+        details:
+          'Mailables sem ShouldQueue foram detectados. Em cenários de volume, envio síncrono aumenta latência e risco de timeout.',
+        impact: 'medium',
+        effort: 'low',
+      }),
+    );
+  }
+
+  if ((metrics.mailsWithSensitiveData || 0) > 0 || (metrics.loggingWithSensitiveData || 0) > 0) {
+    suggestions.push(
+      createSuggestion({
+        category: 'security',
+        title: 'Reduzir exposição de dados sensíveis em Mail/Logs',
+        details:
+          'Há sinais de dados sensíveis em mailables/logging. Minimize payload, aplique masking e evite persistir secrets/tokens em canais observáveis.',
+        impact: 'high',
+        effort: 'low',
+      }),
+    );
+  }
+
+  if ((metrics.scopesWithoutApply || 0) > 0) {
+    suggestions.push(
+      createSuggestion({
+        category: 'architecture',
+        title: 'Padronizar contrato de Scopes com apply()',
+        details:
+          'Foram detectados arquivos de scope sem método apply() explícito. Padronizar o contrato melhora previsibilidade de filtros globais/locais.',
+        impact: 'low',
+        effort: 'low',
+      }),
+    );
+  }
+
+  if ((metrics.websocketWithoutAuthSignals || 0) > 0) {
+    suggestions.push(
+      createSuggestion({
+        category: 'security',
+        title: 'Reforçar autenticação/autorização em Websocket',
+        details:
+          'Há componentes websocket sem sinais claros de authz/authn. Valide handshake, escopo de canal e autorização server-side.',
+        impact: 'high',
+        effort: 'medium',
+      }),
+    );
+  }
+
+  if ((metrics.fatProviders || 0) > 0 || (metrics.providersWithContractImportsWithoutBindings || 0) > 0) {
+    suggestions.push(
+      createSuggestion({
+        category: 'architecture',
+        title: 'Enxugar Providers e reforçar bindings explícitos',
+        details:
+          'Há sinais de providers extensos e/ou imports de contracts sem binding explícito. Consolidar DI e reduzir responsabilidade dos providers melhora previsibilidade do container.',
+        impact: 'medium',
+        effort: 'medium',
+      }),
+    );
+  }
+
+  if (
+    (metrics.fatEvents || 0) > 0 ||
+    (metrics.eventsWithDirectModel || 0) > 0 ||
+    (metrics.eventsWithDatabaseAccess || 0) > 0 ||
+    (metrics.fatObservers || 0) > 0 ||
+    (metrics.observersWithDirectModel || 0) > 0
+  ) {
+    suggestions.push(
+      createSuggestion({
+        category: 'architecture',
+        title: 'Reduzir lógica de domínio dentro de Events/Observers',
+        details:
+          'Foram detectados eventos/observers com sinais de acesso a Model/DB ou excesso de lógica. Mantenha events como contrato de dados e observers com orquestração mínima.',
+        impact: 'high',
+        effort: 'medium',
+      }),
+    );
+  }
+
+  if ((metrics.notificationsWithoutQueue || 0) > 0) {
+    suggestions.push(
+      createSuggestion({
+        category: 'reliability',
+        title: 'Avaliar queue para Notifications de maior impacto',
+        details:
+          'Notifications sem ShouldQueue foram detectadas. Em fluxos de alto volume/custo, o envio síncrono aumenta latência e risco de timeout.',
+        impact: 'medium',
+        effort: 'low',
+      }),
+    );
+  }
+
+  if ((metrics.notificationsWithSensitiveData || 0) > 0) {
+    suggestions.push(
+      createSuggestion({
+        category: 'security',
+        title: 'Revisar payload sensível em Notifications',
+        details:
+          'Há sinais de payload sensível (token/secret/password/code) em notifications. Reduza exposição e use tokens curtos, expiração e masking.',
+        impact: 'high',
+        effort: 'low',
+      }),
+    );
+  }
+
   if ((metrics.httpResourcesWithoutWhenLoaded || 0) > 0) {
     suggestions.push(
       createSuggestion({
