@@ -23,6 +23,7 @@ test('initAceConfig creates default config', () => {
 
   const config = loadAceConfig(root);
   assert.ok(config.analysis.thresholds.fatControllerLines > 0);
+  assert.equal(config.report.language, 'en-US');
   assert.ok(Array.isArray(config.waivers));
 });
 

@@ -277,3 +277,118 @@ class WalletPolicy
   assert.equal(entry.kind, 'policy');
   assert.equal(entry.metrics.policies, 1);
 });
+
+test('analyzer detects queue hygiene issues in critical jobs', () => {
+  const root = makeTmpRoot();
+  const file = path.join(root, 'app', 'Jobs', 'ProcessWalletWithdrawalJob.php');
+
+  writePhp(
+    file,
+    `<?php
+namespace App\\Jobs;
+
+use Illuminate\\Contracts\\Queue\\ShouldQueue;
+use Illuminate\\Foundation\\Queue\\Queueable;
+
+class ProcessWalletWithdrawalJob implements ShouldQueue
+{
+    use Queueable;
+
+    public function handle(): void
+    {
+        // ...
+    }
+}
+`,
+  );
+
+  const payload = analyzeFiles({
+    root,
+    files: [file],
+    testBasenames: new Set(),
+    thresholds: {},
+  });
+
+  const entry = payload['app/Jobs/ProcessWalletWithdrawalJob.php'];
+  assert.ok(entry, 'job entry should exist');
+  assert.equal(entry.kind, 'job');
+  assert.equal(entry.metrics.jobs, 1);
+  assert.equal(entry.metrics.queueJobsMissingTries, 1);
+  assert.equal(entry.metrics.queueJobsMissingTimeout, 1);
+  assert.equal(entry.metrics.criticalQueueJobsWithoutUnique, 1);
+  const types = new Set((entry.violations || []).map((item) => item.type));
+  assert.ok(types.has('job-missing-tries'));
+  assert.ok(types.has('job-missing-timeout'));
+  assert.ok(types.has('critical-job-without-unique'));
+});
+
+test('analyzer classifies listener, middleware, dto and enum kinds', () => {
+  const root = makeTmpRoot();
+  const listenerFile = path.join(root, 'app', 'Listeners', 'UserRegisteredListener.php');
+  const middlewareFile = path.join(root, 'app', 'Http', 'Middleware', 'TenantResolver.php');
+  const dtoFile = path.join(root, 'app', 'DTOs', 'CreateUserDto.php');
+  const enumFile = path.join(root, 'app', 'Enums', 'UserStatus.php');
+
+  writePhp(
+    listenerFile,
+    `<?php
+namespace App\\Listeners;
+
+class UserRegisteredListener
+{
+    public function handle(object $event): void {}
+}
+`,
+  );
+
+  writePhp(
+    middlewareFile,
+    `<?php
+namespace App\\Http\\Middleware;
+
+class TenantResolver
+{
+    public function handle($request, $next)
+    {
+        return $next($request);
+    }
+}
+`,
+  );
+
+  writePhp(
+    dtoFile,
+    `<?php
+namespace App\\DTOs;
+
+class CreateUserDto
+{
+    public function __construct(public string $email) {}
+}
+`,
+  );
+
+  writePhp(
+    enumFile,
+    `<?php
+namespace App\\Enums;
+
+enum UserStatus: string
+{
+    case Active = 'active';
+}
+`,
+  );
+
+  const payload = analyzeFiles({
+    root,
+    files: [listenerFile, middlewareFile, dtoFile, enumFile],
+    testBasenames: new Set(),
+    thresholds: {},
+  });
+
+  assert.equal(payload['app/Listeners/UserRegisteredListener.php'].kind, 'listener');
+  assert.equal(payload['app/Http/Middleware/TenantResolver.php'].kind, 'middleware');
+  assert.equal(payload['app/DTOs/CreateUserDto.php'].kind, 'dto');
+  assert.equal(payload['app/Enums/UserStatus.php'].kind, 'enum');
+});

@@ -1,6 +1,12 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { ACE_DIR, REPORT_FILE } = require('./constants');
+const { loadAceConfig } = require('./config');
+
+const REPORT_LANGUAGE_FILES = {
+  'en-US': 'report.en-US.html',
+  'pt-BR': 'report.pt-BR.html',
+};
 
 function escapeHtml(value) {
   return String(value)
@@ -22,13 +28,558 @@ function formatPercentOrFallback(value, fallback = 'N/A') {
   return `${Math.round(Number(value))}%`;
 }
 
+const REPORT_LOCALES = {
+  'pt-BR': {
+    code: 'pt-BR',
+    reportTitle: 'ACE Report',
+    heroTitle: 'ACE · Architectural Coverage Engine',
+    na: 'N/A',
+    updatedLabel: 'Atualizado',
+    patternLabel: 'Pattern',
+    securityLabel: 'Security',
+    violationsLabel: 'Violations',
+    suggestionsLabel: 'Sugestões',
+    decisionsLabel: 'Decisões',
+    coreScorecards: 'Core Scorecards',
+    achCoverage: 'AchCoverage',
+    trend: 'Tendência',
+    confidence: 'Confiança',
+    securityScore: 'Security Score',
+    securityFails: 'Security Fails',
+    scope: 'Escopo',
+    layering: 'Layering',
+    validation: 'Validation',
+    testability: 'Testability',
+    consistency: 'Consistency',
+    authorization: 'Authorization',
+    securityAutomated: 'Security Automated',
+    securitySemi: 'Security Semi',
+    securityManual: 'Security Manual',
+    securityStatus: 'Security Status',
+    filamentPagesSec: 'Filament Pages Sec',
+    filamentWidgetsSec: 'Filament Widgets Sec',
+    trendDiff: 'Trend & Diff',
+    trendHistoryTitle: 'AchCoverage vs Security (histórico)',
+    lastCycle: 'Último ciclo',
+    newInconsistencies: 'Novas inconsistências',
+    resolvedItems: 'Resolvidas',
+    waivedItems: 'Waived',
+    cacheHits: 'Cache hits',
+    reanalyzedFiles: 'Reanalisados',
+    ignoredByConfig: 'Ignorados por config',
+    domainHealthProfile: 'Domain Health Profile',
+    securityBaseline: 'Security Baseline',
+    securityBaselineEmpty: 'Baseline de segurança ainda não avaliado. Execute um scan.',
+    recentViolations: 'Inconsistências Recentes',
+    recentViolationsEmpty: 'Nenhuma inconsistência registrada no momento.',
+    topHotspots: 'Top Hotspots',
+    topHotspotsEmpty: 'Sem hotspots no momento.',
+    waivedViolationsTitle: 'Waived Violations',
+    waivedViolationsEmpty: 'Nenhuma inconsistência está em waiver ativo.',
+    quickWinsTitle: 'Quick Wins (Impacto Alto + Esforço Baixo)',
+    quickWinsEmpty: 'Sem quick wins disponíveis no momento.',
+    proactiveSuggestions: 'Sugestões Proativas',
+    proactiveSuggestionsEmpty: 'Sem sugestões proativas nesta execução.',
+    inferredPatterns: 'Padrões Inferidos e Esperados',
+    inferredPatternsEmpty: 'Ainda sem padrões inferidos. Execute um scan com escopo relevante.',
+    activeRules: 'Regras Ativas (Formalizadas)',
+    activeRulesEmpty:
+      'Nenhuma regra formalizada. Use MCP `ace.formalize_rule` ou CLI `ace rule:add`.',
+    activeDecisions: 'Decisões Arquiteturais Ativas',
+    activeDecisionsEmpty:
+      'Sem decisões ativas. Registre decisões com MCP `ace.record_arch_decision` ou CLI `ace decision:add`.',
+    status: 'Status',
+    mode: 'Modo',
+    severity: 'Severidade',
+    category: 'Categoria',
+    search: 'Buscar',
+    clearFilters: 'Limpar filtros',
+    allMasc: 'Todos',
+    allFem: 'Todas',
+    fail: 'Fail',
+    warning: 'Warning',
+    unknown: 'Unknown',
+    pass: 'Pass',
+    automated: 'Automated',
+    semi: 'Semi',
+    manual: 'Manual',
+    critical: 'Critical',
+    high: 'High',
+    medium: 'Medium',
+    low: 'Low',
+    control: 'Controle',
+    diagnosis: 'Diagnóstico',
+    recommendation: 'Recomendação',
+    searchSecurityPlaceholder: 'controle, risco, recomendação...',
+    searchViolationsPlaceholder: 'tipo, arquivo, mensagem...',
+    visibleSuffix: 'visíveis',
+    type: 'Tipo',
+    file: 'Arquivo',
+    message: 'Mensagem',
+    suggestion: 'Sugestão',
+    total: 'Total',
+    waiver: 'Waiver',
+    rank: 'Rank',
+    action: 'Ação',
+    detail: 'Detalhe',
+    key: 'Chave',
+    inferred: 'Inferido',
+    expected: 'Esperado',
+    source: 'Fonte',
+    adoption: 'Adoção',
+    id: 'ID',
+    title: 'Título',
+    createdAt: 'Criada em',
+    preference: 'Preferência',
+    impact: 'Impacto',
+    effort: 'Esforço',
+    historyEmpty: 'Sem histórico suficiente ainda.',
+    trendAriaLabel: 'Trend de AchCoverage e Security Score',
+    architectureHealth: 'Architecture Health',
+    performanceHealth: 'Performance Health',
+    securityHealth: 'Security Health',
+    testingHealth: 'Testing Health',
+    governanceHealth: 'Governance Health',
+    filesMissingTests: 'arquivo(s) sem testes',
+    ruleCount: 'regra(s)',
+    decisionCount: 'decisão(ões)',
+    languageLabel: 'Idioma',
+    languageEn: 'English (US)',
+    languagePt: 'Portuguese (BR)',
+    noteLayering: 'camadas',
+    noteConsistency: 'consistência',
+    noteAuthorization: 'autorização',
+    noteUnbounded: 'sem limite',
+    noteFails: 'falha(s)',
+    noteWarnings: 'alerta(s)',
+  },
+  'en-US': {
+    code: 'en-US',
+    reportTitle: 'ACE Report',
+    heroTitle: 'ACE · Architectural Coverage Engine',
+    na: 'N/A',
+    updatedLabel: 'Updated',
+    patternLabel: 'Pattern',
+    securityLabel: 'Security',
+    violationsLabel: 'Violations',
+    suggestionsLabel: 'Suggestions',
+    decisionsLabel: 'Decisions',
+    coreScorecards: 'Core Scorecards',
+    achCoverage: 'AchCoverage',
+    trend: 'Trend',
+    confidence: 'Confidence',
+    securityScore: 'Security Score',
+    securityFails: 'Security Fails',
+    scope: 'Scope',
+    layering: 'Layering',
+    validation: 'Validation',
+    testability: 'Testability',
+    consistency: 'Consistency',
+    authorization: 'Authorization',
+    securityAutomated: 'Security Automated',
+    securitySemi: 'Security Semi',
+    securityManual: 'Security Manual',
+    securityStatus: 'Security Status',
+    filamentPagesSec: 'Filament Pages Sec',
+    filamentWidgetsSec: 'Filament Widgets Sec',
+    trendDiff: 'Trend & Diff',
+    trendHistoryTitle: 'AchCoverage vs Security (history)',
+    lastCycle: 'Last cycle',
+    newInconsistencies: 'New inconsistencies',
+    resolvedItems: 'Resolved',
+    waivedItems: 'Waived',
+    cacheHits: 'Cache hits',
+    reanalyzedFiles: 'Reanalyzed',
+    ignoredByConfig: 'Ignored by config',
+    domainHealthProfile: 'Domain Health Profile',
+    securityBaseline: 'Security Baseline',
+    securityBaselineEmpty: 'Security baseline not evaluated yet. Run a scan.',
+    recentViolations: 'Recent Inconsistencies',
+    recentViolationsEmpty: 'No inconsistencies recorded right now.',
+    topHotspots: 'Top Hotspots',
+    topHotspotsEmpty: 'No hotspots at the moment.',
+    waivedViolationsTitle: 'Waived Violations',
+    waivedViolationsEmpty: 'No inconsistencies are currently waived.',
+    quickWinsTitle: 'Quick Wins (High Impact + Low Effort)',
+    quickWinsEmpty: 'No quick wins available right now.',
+    proactiveSuggestions: 'Proactive Suggestions',
+    proactiveSuggestionsEmpty: 'No proactive suggestions in this run.',
+    inferredPatterns: 'Inferred and Expected Patterns',
+    inferredPatternsEmpty: 'No patterns inferred yet. Run a scan with a relevant scope.',
+    activeRules: 'Active Rules (Formalized)',
+    activeRulesEmpty:
+      'No formalized rules yet. Use MCP `ace.formalize_rule` or CLI `ace rule:add`.',
+    activeDecisions: 'Active Architectural Decisions',
+    activeDecisionsEmpty:
+      'No active decisions yet. Record decisions with MCP `ace.record_arch_decision` or CLI `ace decision:add`.',
+    status: 'Status',
+    mode: 'Mode',
+    severity: 'Severity',
+    category: 'Category',
+    search: 'Search',
+    clearFilters: 'Clear filters',
+    allMasc: 'All',
+    allFem: 'All',
+    fail: 'Fail',
+    warning: 'Warning',
+    unknown: 'Unknown',
+    pass: 'Pass',
+    automated: 'Automated',
+    semi: 'Semi',
+    manual: 'Manual',
+    critical: 'Critical',
+    high: 'High',
+    medium: 'Medium',
+    low: 'Low',
+    control: 'Control',
+    diagnosis: 'Diagnosis',
+    recommendation: 'Recommendation',
+    searchSecurityPlaceholder: 'control, risk, recommendation...',
+    searchViolationsPlaceholder: 'type, file, message...',
+    visibleSuffix: 'visible',
+    type: 'Type',
+    file: 'File',
+    message: 'Message',
+    suggestion: 'Suggestion',
+    total: 'Total',
+    waiver: 'Waiver',
+    rank: 'Rank',
+    action: 'Action',
+    detail: 'Detail',
+    key: 'Key',
+    inferred: 'Inferred',
+    expected: 'Expected',
+    source: 'Source',
+    adoption: 'Adoption',
+    id: 'ID',
+    title: 'Title',
+    createdAt: 'Created at',
+    preference: 'Preference',
+    impact: 'Impact',
+    effort: 'Effort',
+    historyEmpty: 'Not enough history yet.',
+    trendAriaLabel: 'AchCoverage and Security Score trend',
+    architectureHealth: 'Architecture Health',
+    performanceHealth: 'Performance Health',
+    securityHealth: 'Security Health',
+    testingHealth: 'Testing Health',
+    governanceHealth: 'Governance Health',
+    filesMissingTests: 'file(s) missing tests',
+    ruleCount: 'rule(s)',
+    decisionCount: 'decision(s)',
+    languageLabel: 'Language',
+    languageEn: 'English (US)',
+    languagePt: 'Portuguese (BR)',
+    noteLayering: 'layering',
+    noteConsistency: 'consistency',
+    noteAuthorization: 'authorization',
+    noteUnbounded: 'unbounded',
+    noteFails: 'fail(s)',
+    noteWarnings: 'warning(s)',
+  },
+};
+
+function normalizeReportLocale(rawLocale) {
+  const value = String(rawLocale || '').trim().toLowerCase();
+
+  if (!value) {
+    return 'en-US';
+  }
+
+  if (['pt', 'pt-br', 'pt_br', 'ptbr'].includes(value)) {
+    return 'pt-BR';
+  }
+
+  if (['en', 'en-us', 'en_us', 'enus'].includes(value)) {
+    return 'en-US';
+  }
+
+  return 'en-US';
+}
+
+function getReportCopy(rawLocale) {
+  const locale = normalizeReportLocale(rawLocale);
+  return REPORT_LOCALES[locale] || REPORT_LOCALES['en-US'];
+}
+
+function translateDynamicText(value, localeCode) {
+  const input = String(value || '');
+  if (localeCode !== 'en-US' || !input) {
+    return input;
+  }
+
+  const replacements = [
+    [/Sem workflows CI detectados no escopo\./gi, 'No CI workflows detected in scope.'],
+    [/Controle manual: requer evidência fora da análise estática local\./gi, 'Manual control: requires evidence outside local static analysis.'],
+    [/Registrar evidência em docs\/CI e formalizar decisão no ACE para rastreabilidade\./gi, 'Record evidence in docs/CI and formalize the decision in ACE for traceability.'],
+    [/Em produção, garantir APP_DEBUG=false e tratamento seguro de exceções\./gi, 'In production, ensure APP_DEBUG=false and safe exception handling.'],
+    [/Sem menção a webhooks no escopo atual\./gi, 'No webhook mentions in the current scope.'],
+    [/Sem sinais de N\+1 em loops no escopo atual\./gi, 'No N+1 signals in loops within the current scope.'],
+    [/Sem sinal de writes críticos sem transação no escopo\./gi, 'No signal of critical writes without transactions in scope.'],
+    [/Sem bypass explícito de CSRF detectado em rotas state-changing\./gi, 'No explicit CSRF bypass detected in state-changing routes.'],
+    [/Sem sinais suficientes de policies\/gates para ações não-model\./gi, 'Insufficient policy/gate signals for non-model actions.'],
+    [/Nenhum SQL raw dinâmico detectado\./gi, 'No dynamic raw SQL detected.'],
+    [/Nenhum SQL raw detectado\./gi, 'No raw SQL detected.'],
+    [/Nenhuma consulta `->get\(\)` sem limite explícito detectada\./gi, 'No `->get()` queries without explicit limit detected.'],
+    [/Não foram detectados usos de \$request->all\(\)\./gi, 'No `$request->all()` usage detected.'],
+    [/Não foram detectadas rotas de escrita sem throttling\./gi, 'No state-changing routes without throttling were detected.'],
+    [/Nenhum arquivo routes\/\*\.php analisado neste ciclo\./gi, 'No routes/*.php files analyzed in this cycle.'],
+    [/Sem controllers no escopo atual para medir adoção\./gi, 'No controllers in the current scope to measure adoption.'],
+    [/Sem superfície crítica identificada no escopo atual\./gi, 'No critical surface identified in the current scope.'],
+    [/Sem models detectados no escopo atual\./gi, 'No models detected in the current scope.'],
+    [/Nenhum sink perigoso detectado no escopo\./gi, 'No dangerous sink detected in scope.'],
+    [/Versão não identificada no lockfile\./gi, 'Version not identified in lockfile.'],
+    [/não encontrado no lock\/composer\./gi, 'not found in lock/composer.'],
+    [/Adoção consistente de FormRequest\/DTO/gi, 'Consistent FormRequest/DTO adoption'],
+    [/Bloquear raw SQL dinâmico sem binding/gi, 'Block dynamic raw SQL without bindings'],
+    [/Revisar pontos com SQL raw/gi, 'Review raw SQL points'],
+    [/Evitar consultas `->get\(\)` sem limite\/paginação/gi, 'Avoid `->get()` queries without limit/pagination'],
+    [/Revisar risco de N\+1 em acesso a relações/gi, 'Review N+1 risk in relation access'],
+    [/Operações críticas com transação explícita/gi, 'Critical operations with explicit transactions'],
+    [/Autorização server-side em superfícies críticas/gi, 'Server-side authorization on critical surfaces'],
+    [/Cobertura Model ↔ Policy consistente/gi, 'Consistent Model ↔ Policy coverage'],
+    [/Cobertura model↔policy:/gi, 'Model↔policy coverage:'],
+    [/Cobertura de Gates para ações não-model/gi, 'Gate coverage for non-model actions'],
+    [/Rotas de escrita com autenticação/gi, 'State-changing routes with authentication'],
+    [/Revisar bypass de CSRF em rotas de escrita/gi, 'Review CSRF bypass in state-changing routes'],
+    [/APP_DEBUG seguro para produção/gi, 'APP_DEBUG safe for production'],
+    [/Livewire com propriedades públicas protegidas/gi, 'Livewire with protected public properties'],
+    [/Filament Pages com autorização\/visibilidade explícita/gi, 'Filament Pages with explicit authorization/visibility'],
+    [/Filament Widgets com autorização\/visibilidade explícita/gi, 'Filament Widgets with explicit authorization/visibility'],
+    [/Upload com validação e restrições explícitas/gi, 'Upload with explicit validation and constraints'],
+    [/Webhook com validação de assinatura/gi, 'Webhook with signature validation'],
+    [/DAST em staging\/rotas críticas/gi, 'DAST in staging/critical routes'],
+    [/Threat modeling de fluxos críticos/gi, 'Threat modeling for critical flows'],
+    [/Revisão periódica de isolamento multi-tenant/gi, 'Periodic review of multi-tenant isolation'],
+    [/Política de rotação de segredos ativa/gi, 'Active secret rotation policy'],
+    [/Pentest\/review de segurança por release/gi, 'Security pentest/review per release'],
+    [/Padronizar Controller -> Service/gi, 'Standardize Controller -> Service'],
+    [/Aumentar uso de FormRequest\/DTO em escrita/gi, 'Increase FormRequest/DTO usage in writes'],
+    [/Formalizar 1-2 decisões arquiteturais do padrão dominante/gi, 'Formalize 1-2 architectural decisions from the dominant pattern'],
+    [/Evitar `Model::all\(\)` em serviços e comandos/gi, 'Avoid `Model::all()` in services and commands'],
+    [/Revisar raw SQL com variáveis dinâmicas/gi, 'Review raw SQL with dynamic variables'],
+    [/Reduzir consultas `->get\(\)` sem paginação\/limite/gi, 'Reduce `->get()` queries without pagination/limit'],
+    [/Revisar potenciais N\+1 em loops com relações/gi, 'Review potential N+1 in loops with relations'],
+    [/Aplicar unicidade\/idempotência em jobs críticos/gi, 'Apply uniqueness/idempotency in critical jobs'],
+    [/Remover acesso direto a Model em middleware/gi, 'Remove direct Model access from middleware'],
+    [/Remover `\$request->all\(\)` em pontos críticos/gi, 'Remove `$request->all()` in critical points'],
+    [/Fechar lacunas de testes em camadas de negócio/gi, 'Close test gaps in business layers'],
+    [/Reduzir métodos longos em controllers/gi, 'Reduce long methods in controllers'],
+    [/Job enfileirado sem `\$tries` explícito/gi, 'Queued job without explicit `$tries`'],
+    [/Job enfileirado sem `\$timeout` explícito/gi, 'Queued job without explicit `$timeout`'],
+    [/Job sem handler `failed\(\)` explícito/gi, 'Job without explicit `failed()` handler'],
+    [/Defina `\$tries` de forma explícita no Job\./gi, 'Define `$tries` explicitly in the Job.'],
+    [/Defina `\$timeout` coerente com o SLA da operação\./gi, 'Define `$timeout` aligned with the operation SLA.'],
+    [/Considere implementar `failed\(Throwable \$e\)` para fallback\/alerta\./gi, 'Consider implementing `failed(Throwable $e)` for fallback/alerting.'],
+    [/sem teste dedicado/gi, 'without dedicated test'],
+    [/Adicionar teste unitário para/gi, 'Add unit test for'],
+    [/Filament Page sem sinal explícito de controle de acesso/gi, 'Filament Page without explicit access control signal'],
+    [/Filament page extensa/gi, 'Large Filament page'],
+    [/Extrair lógica para Services\/Actions e reduzir responsabilidade da Page\./gi, 'Extract logic to Services/Actions and reduce Page responsibility.'],
+    [/Extrair passos para Services\/Actions reutilizáveis\./gi, 'Extract steps into reusable Services/Actions.'],
+    [/consulta\(s\) com `->get\(\)` sem limite\/paginação detectada\(s\)/gi, 'query(ies) with `->get()` without limit/pagination detected'],
+    [/Prefira paginação \(`paginate\/cursorPaginate`\) ou limite explícito para consultas potencialmente grandes\./gi, 'Prefer pagination (`paginate/cursorPaginate`) or explicit limits for potentially large queries.'],
+    [/ponto\(s\) de SQL raw com variável dinâmica detectado\(s\)/gi, 'raw SQL point(s) with dynamic variables detected'],
+    [/Substitua por bindings parametrizados ou Query Builder com whitelist\./gi, 'Replace with parameterized bindings or Query Builder with whitelist.'],
+    [/Sinais de upload:/gi, 'Upload signals:'],
+    [/validações explícitas/gi, 'explicit validations'],
+    [/Aplique whitelist de MIME\/extensão\/tamanho e validation server-side\./gi, 'Apply MIME/extension/size whitelisting and server-side validation.'],
+    [/Garanta policy para models críticos e registre mapeamento explícito quando fugir de convenção\./gi, 'Ensure policies for critical models and register explicit mapping when deviating from convention.'],
+    [/Garanta authorize\/policies em ações críticas/gi, 'Ensure authorize/policies on critical actions'],
+    [/arquivo\(s\) com escrita crítica sem sinal de `DB::transaction\(\)`\./gi, 'file(s) with critical writes without `DB::transaction()` signal.'],
+    [/Encapsular fluxos financeiros\/criticos em transação e reforçar idempotência\./gi, 'Wrap financial/critical flows in transactions and reinforce idempotency.'],
+    [/ocorrência\(s\) de \$request->all\(\) detectada\(s\)\./gi, 'occurrence(s) of `$request->all()` detected.'],
+    [/Prefira \$request->validated\(\) \(FormRequest\) ou DTO com contrato explícito\./gi, 'Prefer `$request->validated()` (FormRequest) or DTO with explicit contract.'],
+    [/Implemente `canView\(\)` e\/ou guardas server-side em widgets que exibem dados sensíveis\./gi, 'Implement `canView()` and/or server-side guards in widgets that expose sensitive data.'],
+    [/Use #\[Locked\] para campos imutáveis e valide\/autorize todas mutações\./gi, 'Use #[Locked] for immutable fields and validate/authorize all mutations.'],
+    [/Aplicar with\/load onde houver iteração de entidades com relações\./gi, 'Apply with/load where iterating entities with relations.'],
+    [/ocorrência\(s\) de consulta potencialmente não limitada detectada\(s\)\./gi, 'occurrence(s) of potentially unbounded queries detected.'],
+    [/Sem Gate::define explícito; políticas existentes cobrem parte da authorization\./gi, 'No explicit Gate::define; existing policies cover part of authorization.'],
+    [/Para ações fora de CRUD de model, prefira Gate::define\/resource e checagem explícita no ponto de uso\./gi, 'For actions outside model CRUD, prefer Gate::define/resource and explicit checks at use sites.'],
+    [/Adoção atual de FormRequest\/DTO:/gi, 'Current FormRequest/DTO adoption:'],
+    [/Padronize validation de entrada para reduzir payload poisoning e inconsistência\./gi, 'Standardize input validation to reduce payload poisoning and inconsistency.'],
+    [/Padronize `canAccess\(\)`\/authorize\/policy para cada Page sensível exposta no painel\./gi, 'Standardize `canAccess()`/authorize/policy for each sensitive Page exposed in the panel.'],
+    [/Proteja APIs sensíveis com `auth:sanctum` e confirme `HasApiTokens` nos modelos emissores de token\./gi, 'Protect sensitive APIs with `auth:sanctum` and confirm `HasApiTokens` in token-issuing models.'],
+    [/Confirme compensações fortes ao usar bypass de CSRF \(auth robusta, assinatura, nonce\)\./gi, 'Confirm strong compensating controls when using CSRF bypass (robust auth, signature, nonce).'],
+    [/Configuração CORS explícita/gi, 'Explicit CORS configuration'],
+    [/Configure CORS por origem\/método\/header estritamente necessários\./gi, 'Configure CORS with strictly required origin/method/header.'],
+    [/Mover preparação of dados for camada of serviço e simplificar o Widget\./gi, 'Move data preparation to the service layer and simplify the Widget.'],
+    [/Use paginação\/filtros e delegue consulta for Service\/UseCase\./gi, 'Use pagination/filters and delegate query logic to Service/UseCase.'],
+    [/O ACE já consegue inferir padrões\. Converter decisões recorrentes in decisões persistentes reduz oscilactions da LLM entre features\./gi, 'ACE already infers patterns. Converting recurring decisions into persistent decisions reduces LLM oscillation between features.'],
+    [/Paginação e filtros in the Service\/UseCase reduzem carga e risco of gargalos in listas crescentes\./gi, 'Pagination and filters in Service/UseCase reduce load and bottleneck risk in growing lists.'],
+    [/Foram detectadas consultas with `->get\(\)` without limite explicit\. in listas grandes isso costuma degradar memória e tempo of resposta\./gi, 'Queries with `->get()` without explicit limits were detected. In large lists, this usually degrades memory and response time.'],
+    [/Jobs with lacunas of resiliência detectados \(tries ausente: ([0-9]+), timeout ausente: ([0-9]+)\)\./gi, 'Jobs with resilience gaps detected (missing tries: $1, missing timeout: $2).'],
+    [/Foram detectadas leituras totais outside of controllers\. in jobs\/commands\/services isso costuma escalar mal in memória e tempo\./gi, 'Total reads outside controllers were detected. In jobs/commands/services this usually scales poorly in memory and time.'],
+    [/Há uso of DB::raw\/selectRaw\/whereRaw with interpolação dynamic\. Priorize bindings e Query Builder for reduzir risco\./gi, 'DB::raw/selectRaw/whereRaw usage with dynamic interpolation was detected. Prioritize bindings and Query Builder to reduce risk.'],
+    [/Há signals of acesso a relactions dentro of loop without eager loading claro\. Isso pode multiplicar queries in production\./gi, 'There are signals of relation access inside loops without clear eager loading. This can multiply queries in production.'],
+    [/flows with palavras-chave financeiras e escrita without transaction foram detectados\. Isso aumenta risco of inconsistency in concorrência\/falhas parciais\./gi, 'Flows with financial keywords and writes without transactions were detected. This increases inconsistency risk under concurrency/partial failures.'],
+    [/Foram detectados jobs with contexto financial\/estado critical without sinal of unicidade\. Isso eleva risco of execução duplicada\./gi, 'Jobs with financial/critical context without uniqueness signals were detected. This increases duplicated execution risk.'],
+    [/Há middleware with consulta direta a Model, o que aumenta acoplamento e dificulta evolução do pipeline HTTP\./gi, 'There is middleware with direct Model access, which increases coupling and hinders HTTP pipeline evolution.'],
+    [/Há serviços\/controllers without testes detectados\. Priorize hotspots with mais alteractions e maior impacto\./gi, 'Services/controllers without tests were detected. Prioritize hotspots with more changes and higher impact.'],
+    [/Quebrar comandos larges in steps reutilizáveis/gi, 'Break large commands into reusable steps'],
+    [/Commands longos dificultam manutenção operationale\. Extrair passos for services\/actions melhora testabilidade e reuso\./gi, 'Long commands hurt operational maintainability. Extracting steps to services/actions improves testability and reuse.'],
+    [/Resources grandes tendem a misturar regra of negócio with configuration of UI\. Mover regra for Services\/Policies melhora evolução\./gi, 'Large resources tend to mix business rules with UI configuration. Moving rules to Services/Policies improves evolution.'],
+    [/Priorizar resolução of violactions of alto impacto/gi, 'Prioritize resolving high-impact violations'],
+    [/Existem múltiplas violactions of severidade alta\. consider uma sprint curta of estabilização arquitetural\./gi, 'There are multiple high-severity violations. Consider a short architectural stabilization sprint.'],
+    [/Mover preparação of dados for camada of serviço e simplificar o Widget\./gi, 'Move data preparation to the service layer and simplify the Widget.'],
+    [/Use paginação\/filtros e delegue consulta for Service\/UseCase\./gi, 'Use pagination/filters and delegate query logic to Service/UseCase.'],
+    [/O ACE já consegue inferir padrões\. Converter decisões recorrentes in decisões persistentes reduz oscilactions da LLM entre features\./gi, 'ACE already infers patterns. Converting recurring decisions into persistent decisions reduces LLM oscillation between features.'],
+    [/Paginação e filtros in the Service\/UseCase reduzem carga e risco of gargalos in listas crescentes\./gi, 'Pagination and filters in Service/UseCase reduce load and bottleneck risk in growing lists.'],
+    [/Foram detectadas consultas with `-&gt;get\(\)` without limite explicit\. in listas grandes isso costuma degradar memória e tempo of resposta\./gi, 'Queries with `->get()` without explicit limits were detected. In large lists, this usually degrades memory and response time.'],
+    [/Jobs with lacunas of resiliência detectados \(tries ausente: ([0-9]+), timeout ausente: ([0-9]+)\)\./gi, 'Jobs with resilience gaps detected (missing tries: $1, missing timeout: $2).'],
+    [/Foram detectadas leituras totais outside of controllers\. in jobs\/commands\/services isso costuma escalar mal in memória e tempo\./gi, 'Total reads outside controllers were detected. In jobs/commands/services this usually scales poorly in memory and time.'],
+    [/Há uso of DB::raw\/selectRaw\/whereRaw with interpolação dynamic\. Priorize bindings e Query Builder for reduzir risco\./gi, 'DB::raw/selectRaw/whereRaw usage with dynamic interpolation was detected. Prioritize bindings and Query Builder to reduce risk.'],
+    [/Há signals of acesso a relactions dentro of loop without eager loading claro\. Isso pode multiplicar queries in production\./gi, 'There are signals of relation access inside loops without clear eager loading. This can multiply queries in production.'],
+    [/flows with palavras-chave financeiras e escrita without transaction foram detectados\. Isso aumenta risco of inconsistency in concorrência\/falhas parciais\./gi, 'Flows with financial keywords and writes without transactions were detected. This increases inconsistency risk under concurrency/partial failures.'],
+    [/Foram detectados jobs with contexto financial\/estado critical without sinal of unicidade\. Isso eleva risco of execução duplicada\./gi, 'Jobs with financial/critical context without uniqueness signals were detected. This increases duplicated execution risk.'],
+    [/Há middleware with consulta direta a Model, o que aumenta acoplamento e dificulta evolução do pipeline HTTP\./gi, 'There is middleware with direct Model access, which increases coupling and hinders HTTP pipeline evolution.'],
+    [/Há serviços\/controllers without testes detectados\. Priorize hotspots with mais alteractions e maior impacto\./gi, 'Services/controllers without tests were detected. Prioritize hotspots with more changes and higher impact.'],
+    [/Quebrar comandos larges in steps reutilizáveis/gi, 'Break large commands into reusable steps'],
+    [/Commands longos dificultam manutenção operationale\. Extrair passos for services\/actions melhora testabilidade e reuso\./gi, 'Long commands hurt operational maintainability. Extracting steps to services/actions improves testability and reuse.'],
+    [/Resources grandes tendem a misturar regra of negócio with configuration of UI\. Mover regra for Services\/Policies melhora evolução\./gi, 'Large resources tend to mix business rules with UI configuration. Moving rules to Services/Policies improves evolution.'],
+    [/Priorizar resolução of violactions of alto impacto/gi, 'Prioritize resolving high-impact violations'],
+    [/Existem múltiplas violactions of severidade alta\. consider uma sprint curta of estabilização arquitetural\./gi, 'There are multiple high-severity violations. Consider a short architectural stabilization sprint.'],
+    [/O ACE já consegue inferir padrões\. Converter decisões recorrentes in decisões persistentes reduz oscilactions da LLM entre features\./gi, 'ACE already infers patterns. Converting recurring decisions into persistent decisions reduces LLM oscillation between features.'],
+    [/Paginação e filtros in the Service\/UseCase reduzem carga e risco of gargalos in listas crescentes\./gi, 'Pagination and filters in Service/UseCase reduce load and bottleneck risk in growing lists.'],
+    [/Foram detectadas consultas with `->get\(\)` without limite explicit\. in listas grandes isso costuma degradar memória e tempo of resposta\./gi, 'Queries with `->get()` without explicit limits were detected. In large lists, this usually degrades memory and response time.'],
+    [/Foram detectadas leituras totais outside of controllers\. in jobs\/commands\/services isso costuma escalar mal in memória e tempo\./gi, 'Total reads outside controllers were detected. In jobs/commands/services this usually scales poorly in memory and time.'],
+    [/Há uso of DB::raw\/selectRaw\/whereRaw with interpolação dynamic\. Priorize bindings e Query Builder for reduzir risco\./gi, 'DB::raw/selectRaw/whereRaw usage with dynamic interpolation was detected. Prioritize bindings and Query Builder to reduce risk.'],
+    [/Há signals of acesso a relactions dentro of loop without eager loading claro\. Isso pode multiplicar queries in production\./gi, 'There are signals of relation access inside loops without clear eager loading. This can multiply queries in production.'],
+    [/flows with palavras-chave financeiras e escrita without transaction foram detectados\. Isso aumenta risco of inconsistency in concorrência\/falhas parciais\./gi, 'Flows with financial keywords and writes without transactions were detected. This increases inconsistency risk under concurrency/partial failures.'],
+    [/Jobs with lacunas of resiliência detectados \(tries ausente: ([0-9]+), timeout ausente: ([0-9]+)\)\./gi, 'Jobs with resilience gaps detected (missing tries: $1, missing timeout: $2).'],
+    [/Foram detectados jobs with contexto financial\/estado critical without sinal of unicidade\. Isso eleva risco of execução duplicada\./gi, 'Jobs with financial/critical context without uniqueness signals were detected. This increases duplicated execution risk.'],
+    [/Há middleware with consulta direta a Model, o que aumenta acoplamento e dificulta evolução do pipeline HTTP\./gi, 'There is middleware with direct Model access, which increases coupling and hinders HTTP pipeline evolution.'],
+    [/Há serviços\/controllers without testes detectados\. Priorize hotspots with mais alteractions e maior impacto\./gi, 'Services/controllers without tests were detected. Prioritize hotspots with more changes and higher impact.'],
+    [/Quebrar comandos larges in steps reutilizáveis/gi, 'Break large commands into reusable steps'],
+    [/Commands longos dificultam manutenção operationale\. Extrair passos for services\/actions melhora testabilidade e reuso\./gi, 'Long commands hurt operational maintainability. Extracting steps to services/actions improves testability and reuse.'],
+    [/Resources grandes tendem a misturar regra of negócio with configuration of UI\. Mover regra for Services\/Policies melhora evolução\./gi, 'Large resources tend to mix business rules with UI configuration. Moving rules to Services/Policies improves evolution.'],
+    [/Priorizar resolução of violactions of alto impacto/gi, 'Prioritize resolving high-impact violations'],
+    [/Existem múltiplas violactions of severidade alta\. consider uma sprint curta of estabilização arquitetural\./gi, 'There are multiple high-severity violations. Consider a short architectural stabilization sprint.'],
+    [/Extrair regras for Services\/Policies e simplificar configuração da Resource\./gi, 'Extract rules to Services/Policies and simplify Resource configuration.'],
+    [/Extrair regras para Services\/Policies e simplificar configuração da Resource\./gi, 'Extract rules to Services/Policies and simplify Resource configuration.'],
+    [/signals of authorization server-side por superfície:/gi, 'server-side authorization signals per surface:'],
+    [/com signals dynamic exigindo revisão manual\./gi, 'with dynamic signals requiring manual review.'],
+    [/uso\(s\) of SQL raw exigem revisão contextual/gi, 'raw SQL usage(s) require contextual review'],
+    [/ou Query Builder without concatenação dynamic\./gi, 'or Query Builder without dynamic concatenation.'],
+    [/prefer bindings \(`\\?` \+ array\) ou Query Builder without concatenação dynamic\./gi, 'Prefer bindings (`?` + array) or Query Builder without dynamic concatenation.'],
+    [/without Gate::define explicit; políticas existentes cover parte da authorization\./gi, 'Without explicit Gate::define; existing policies cover part of authorization.'],
+    [/for cada sql raw, valide bind seguro, limites e make explicit rationale of performance\./gi, 'For each raw SQL usage, validate safe binding, limits, and make performance rationale explicit.'],
+    [/potencialmente/gi, 'potentially'],
+    [/inseguro/gi, 'unsafe'],
+    [/concatena[cç][aã]o/gi, 'concatenation'],
+    [/configura[cç][aã]o/gi, 'configuration'],
+    [/regras/gi, 'rules'],
+    [/exigem/gi, 'require'],
+    [/revis[aã]o/gi, 'review'],
+    [/contextual/gi, 'contextual'],
+    [/pol[íi]ticas/gi, 'policies'],
+    [/parte da/gi, 'part of the'],
+    [/por superf[íi]cie/gi, 'per surface'],
+    [/\bou\b/gi, 'or'],
+    [/\bcada\b/gi, 'each'],
+    [/valide/gi, 'validate'],
+    [/versão/gi, 'version'],
+    [/acima do floor de security conhecido/gi, 'above the known security floor'],
+    [/atende floor/gi, 'meets floor'],
+    [/evitar/gi, 'avoid'],
+    [/revisar/gi, 'review'],
+    [/adicionar/gi, 'add'],
+    [/aplicar/gi, 'apply'],
+    [/prefira/gi, 'prefer'],
+    [/garanta/gi, 'ensure'],
+    [/considere/gi, 'consider'],
+    [/defina/gi, 'define'],
+    [/padronize/gi, 'standardize'],
+    [/produ[cç][aã]o/gi, 'production'],
+    [/seguran[cç]a/gi, 'security'],
+    [/autoriza[cç][aã]o/gi, 'authorization'],
+    [/valida[cç][aã]o/gi, 'validation'],
+    [/recomend[aã][cç][aã]o/gi, 'recommendation'],
+    [/detectado\(s\)/gi, 'detected'],
+    [/detectada\(s\)/gi, 'detected'],
+    [/arquivo\(s\)/gi, 'file(s)'],
+    [/ocorr[êe]ncia\(s\)/gi, 'occurrence(s)'],
+    [/chamada\(s\)/gi, 'call(s)'],
+    [/consulta\(s\)/gi, 'query(ies)'],
+    [/expl[íi]cito/gi, 'explicit'],
+    [/a[çc][õo]es/gi, 'actions'],
+    [/pain[ée]is/gi, 'panels'],
+    [/cr[íi]tic[oa]s?/gi, 'critical'],
+    [/sinais?/gi, 'signals'],
+    [/rela[cç][aã]o/gi, 'relation'],
+    [/rela[cç][õo]es/gi, 'relations'],
+    [/itera[cç][aã]o/gi, 'iteration'],
+    [/itera[cç][õo]es/gi, 'iterations'],
+    [/entrada/gi, 'input'],
+    [/inconsist[êe]ncia/gi, 'inconsistency'],
+    [/inconsist[êe]ncias/gi, 'inconsistencies'],
+    [/r[íi]gida/gi, 'strict'],
+    [/isolamento/gi, 'isolation'],
+    [/direto/gi, 'direct'],
+    [/fluxos/gi, 'flows'],
+    [/financeiros?/gi, 'financial'],
+    [/transa[cç][aã]o/gi, 'transaction'],
+    [/idempot[êe]ncia/gi, 'idempotency'],
+    [/din[âa]mic[oa]s?/gi, 'dynamic'],
+    [/explicite/gi, 'make explicit'],
+    [/racional/gi, 'rationale'],
+    [/cobrem/gi, 'cover'],
+    [/fora de/gi, 'outside of'],
+    [/ponto de uso/gi, 'point of use'],
+    [/mantenha/gi, 'keep'],
+    [/atualizado/gi, 'updated'],
+    [/corrigir/gi, 'fix'],
+    [/inseguros/gi, 'unsafe'],
+    [/compensa[cç][õo]es?/gi, 'compensating controls'],
+    [/robusta/gi, 'robust'],
+    [/assinatura/gi, 'signature'],
+    [/origem/gi, 'origin'],
+    [/m[eé]todo/gi, 'method'],
+    [/estritamente/gi, 'strictly'],
+    [/necess[áa]rios/gi, 'required'],
+    [/extens[ãa]o/gi, 'extension'],
+    [/tamanho/gi, 'size'],
+    [/campos/gi, 'fields'],
+    [/imut[áa]veis/gi, 'immutable'],
+    [/muta[cç][õo]es?/gi, 'mutations'],
+    [/responsabilidade/gi, 'responsibility'],
+    [/extenso/gi, 'large'],
+    [/linhas/gi, 'lines'],
+    [/m[eé]todos/gi, 'methods'],
+    [/\bem\b/gi, 'in'],
+    [/\bpara\b/gi, 'for'],
+    [/\bcom\b/gi, 'with'],
+    [/\bsem\b/gi, 'without'],
+    [/\bde\b/gi, 'of'],
+    [/\bno\b/gi, 'in the'],
+    [/\bna\b/gi, 'in the'],
+    [/\bprodução\b/gi, 'production'],
+    [/\bsegurança\b/gi, 'security'],
+    [/\bautorização\b/gi, 'authorization'],
+    [/\bvalidação\b/gi, 'validation'],
+    [/\brecomendação\b/gi, 'recommendation'],
+    [/\bdetectado\(s\)\b/gi, 'detected'],
+    [/\bdetectada\(s\)\b/gi, 'detected'],
+  ];
+
+  let output = input;
+  for (let i = 0; i < 3; i += 1) {
+    const next = replacements.reduce((acc, [pattern, replacement]) => acc.replace(pattern, replacement), output);
+    if (next === output) {
+      break;
+    }
+    output = next;
+  }
+  return output;
+}
+
 function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
 }
 
-function buildTrendChartSvg(history) {
+function buildTrendChartSvg(history, copy) {
   if (!history || history.length === 0) {
-    return '<p class="empty">Sem histórico suficiente ainda.</p>';
+    return `<p class="empty">${escapeHtml(copy.historyEmpty)}</p>`;
   }
 
   const points = history.slice(-36);
@@ -69,7 +620,7 @@ function buildTrendChartSvg(history) {
 
   return `
     <div class="trend-svg-wrap">
-      <svg class="trend-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="Trend de AchCoverage e Security Score">
+      <svg class="trend-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="${escapeHtml(copy.trendAriaLabel)}">
         <defs>
           <linearGradient id="aceTrendArea" x1="0" y1="0" x2="0" y2="1">
             <stop offset="0%" stop-color="#60a5fa" stop-opacity="0.4"></stop>
@@ -83,13 +634,13 @@ function buildTrendChartSvg(history) {
         <polyline points="${securityPoints}" class="trend-line trend-line-security"></polyline>
       </svg>
       <div class="trend-legend">
-        <span><i class="trend-dot trend-dot-overall"></i> AchCoverage (${latestOverall}%)</span>
-        <span><i class="trend-dot trend-dot-security"></i> Security (${latestSecurity}%)</span>
+        <span><i class="trend-dot trend-dot-overall"></i> ${escapeHtml(copy.achCoverage)} (${latestOverall}%)</span>
+        <span><i class="trend-dot trend-dot-security"></i> ${escapeHtml(copy.securityLabel)} (${latestSecurity}%)</span>
       </div>
     </div>`;
 }
 
-function buildHealthDomains(state) {
+function buildHealthDomains(state, copy) {
   const coverage = state.coverage || {};
   const dimensions = coverage.dimensions || {};
   const security = state.security || {};
@@ -130,33 +681,33 @@ function buildHealthDomains(state) {
   return [
     {
       key: 'architecture',
-      label: 'Architecture Health',
+      label: copy.architectureHealth,
       score: architectureScore,
-      note: `${Math.round(Number(dimensions.layering || 0))}% layering · ${Math.round(Number(dimensions.consistency || 0))}% consistency`,
+      note: `${Math.round(Number(dimensions.layering || 0))}% ${copy.noteLayering} · ${Math.round(Number(dimensions.consistency || 0))}% ${copy.noteConsistency} · ${Math.round(Number(dimensions.authorization || 0))}% ${copy.noteAuthorization}`,
     },
     {
       key: 'performance',
-      label: 'Performance Health',
+      label: copy.performanceHealth,
       score: performanceScore,
-      note: `${Number(stats.unboundedGetCalls || 0)} unbounded · ${Number(stats.possibleNPlusOneRisks || 0)} N+1`,
+      note: `${Number(stats.unboundedGetCalls || 0)} ${copy.noteUnbounded} · ${Number(stats.possibleNPlusOneRisks || 0)} N+1`,
     },
     {
       key: 'security',
-      label: 'Security Health',
+      label: copy.securityHealth,
       score: securityScore,
-      note: `${Number(security.totals?.fail || 0)} fail(s) · ${Number(security.totals?.warning || 0)} warning(s)`,
+      note: `${Number(security.totals?.fail || 0)} ${copy.noteFails} · ${Number(security.totals?.warning || 0)} ${copy.noteWarnings}`,
     },
     {
       key: 'testing',
-      label: 'Testing Health',
+      label: copy.testingHealth,
       score: testingScore,
-      note: `${Number(stats.missingTests || 0)} arquivo(s) sem testes`,
+      note: `${Number(stats.missingTests || 0)} ${copy.filesMissingTests}`,
     },
     {
       key: 'governance',
-      label: 'Governance Health',
+      label: copy.governanceHealth,
       score: governanceScore,
-      note: `${rules.length} regra(s) · ${decisions.length} decisão(ões)`,
+      note: `${rules.length} ${copy.ruleCount} · ${decisions.length} ${copy.decisionCount}`,
     },
   ];
 }
@@ -177,6 +728,16 @@ function buildQuickWins(suggestions = []) {
     })
     .sort((a, b) => b.quickWinScore - a.quickWinScore)
     .slice(0, 8);
+}
+
+function resolveSecondaryCardColumnSpans(cardCount) {
+  if (cardCount <= 0) return [];
+  if (cardCount === 1) return [12];
+  if (cardCount === 2) return [6, 6];
+  if (cardCount === 3) return [4, 4, 4];
+  if (cardCount === 4) return [3, 3, 3, 3];
+  if (cardCount === 5) return [4, 2, 2, 2, 2];
+  return Array.from({ length: cardCount }, () => 2);
 }
 
 function severityBadge(severity) {
@@ -204,7 +765,9 @@ function controlStatusClass(status) {
   return 'badge badge-low';
 }
 
-function generateHtmlReport(state) {
+function generateHtmlReport(state, options = {}) {
+  const copy = getReportCopy(options.locale);
+  const languageFiles = options.languageFiles || REPORT_LANGUAGE_FILES;
   const coverage = state.coverage || {};
   const dimensions = coverage.dimensions || {};
   const trend = coverage.delta || 0;
@@ -227,21 +790,52 @@ function generateHtmlReport(state) {
   const hasFilamentWidgetScore = Boolean(filamentScores.widgets);
   const filamentPageScore = hasFilamentPageScore ? Number(filamentScores.pages?.score || 0) : null;
   const filamentWidgetScore = hasFilamentWidgetScore ? Number(filamentScores.widgets?.score || 0) : null;
-  const filamentSecurityCards = `
-        ${hasFilamentPageScore
-          ? `<article class="kpi-card">
-          <h3>Filament Pages Sec</h3>
-          <p class="metric">${formatPercentOrFallback(filamentPageScore)}</p>
-        </article>`
-          : ''}
-        ${hasFilamentWidgetScore
-          ? `<article class="kpi-card">
-          <h3>Filament Widgets Sec</h3>
-          <p class="metric">${formatPercentOrFallback(filamentWidgetScore)}</p>
-        </article>`
-          : ''}`;
-  const trendSvg = buildTrendChartSvg(recentHistory);
-  const healthDomainCards = buildHealthDomains(state)
+  const secondaryCards = [
+    {
+      title: copy.securityAutomated,
+      value: formatPercent(securityModeSummary.automated?.score || 0),
+    },
+    {
+      title: copy.securitySemi,
+      value: formatPercent(securityModeSummary.semi?.score || 0),
+    },
+    {
+      title: copy.securityManual,
+      value: formatPercent(securityModeSummary.manual?.score || 0),
+    },
+    {
+      title: copy.securityStatus,
+      value: `${Number(securityTotals.pass || 0)}/${Number(securityTotals.total || 0)}`,
+    },
+    ...(hasFilamentPageScore
+      ? [
+          {
+            title: copy.filamentPagesSec,
+            value: formatPercentOrFallback(filamentPageScore, copy.na),
+          },
+        ]
+      : []),
+    ...(hasFilamentWidgetScore
+      ? [
+          {
+            title: copy.filamentWidgetsSec,
+            value: formatPercentOrFallback(filamentWidgetScore, copy.na),
+          },
+        ]
+      : []),
+  ];
+  const secondaryCardSpans = resolveSecondaryCardColumnSpans(secondaryCards.length);
+  const secondaryCardMarkup = secondaryCards
+    .map(
+      (item, index) => `
+        <article class="kpi-card kpi-col-${Number(secondaryCardSpans[index] || 2)}">
+          <h3>${escapeHtml(item.title)}</h3>
+          <p class="metric">${escapeHtml(item.value)}</p>
+        </article>`,
+    )
+    .join('');
+  const trendSvg = buildTrendChartSvg(recentHistory, copy);
+  const healthDomainCards = buildHealthDomains(state, copy)
     .map(
       (item) => `
       <article class="health-card health-${escapeHtml(item.key)}">
@@ -254,17 +848,20 @@ function generateHtmlReport(state) {
     .join('');
   const quickWins = buildQuickWins(suggestions);
   const quickWinRows = quickWins
-    .map(
-      (item, index) => `
+    .map((item, index) => {
+      const translatedTitle = translateDynamicText(item.title || '-', copy.code);
+      const translatedCategory = translateDynamicText(item.category || '-', copy.code);
+      const translatedDetails = translateDynamicText(item.details || '-', copy.code);
+      return `
       <tr>
         <td>#${index + 1}</td>
-        <td>${escapeHtml(item.title || '-')}</td>
-        <td>${escapeHtml(item.category || '-')}</td>
+        <td>${escapeHtml(translatedTitle)}</td>
+        <td>${escapeHtml(translatedCategory)}</td>
         <td><span class="badge ${item.impact === 'high' ? 'badge-high' : item.impact === 'medium' ? 'badge-medium' : 'badge-low'}">${escapeHtml(item.impact || '-')}</span></td>
         <td><span class="badge ${item.effort === 'low' ? 'badge-ok' : item.effort === 'medium' ? 'badge-medium' : 'badge-high'}">${escapeHtml(item.effort || '-')}</span></td>
-        <td>${escapeHtml(item.details || '-')}</td>
-      </tr>`,
-    )
+        <td>${escapeHtml(translatedDetails)}</td>
+      </tr>`;
+    })
     .join('');
 
   const hotspotMap = new Map();
@@ -297,20 +894,23 @@ function generateHtmlReport(state) {
 
   const suggestionCards = suggestions
     .slice(0, 40)
-    .map(
-      (item) => `
+    .map((item) => {
+      const translatedCategory = translateDynamicText(item.category, copy.code);
+      const translatedTitle = translateDynamicText(item.title, copy.code);
+      const translatedDetails = translateDynamicText(item.details, copy.code);
+      return `
       <article class="suggestion-card">
         <header>
-          <span class="pill">${escapeHtml(item.category)}</span>
-          <h4>${escapeHtml(item.title)}</h4>
+          <span class="pill">${escapeHtml(translatedCategory)}</span>
+          <h4>${escapeHtml(translatedTitle)}</h4>
         </header>
-        <p>${escapeHtml(item.details)}</p>
+        <p>${escapeHtml(translatedDetails)}</p>
         <footer>
-          <span>Impacto: <strong>${escapeHtml(item.impact)}</strong></span>
-          <span>Esforço: <strong>${escapeHtml(item.effort)}</strong></span>
+          <span>${escapeHtml(copy.impact)}: <strong>${escapeHtml(item.impact)}</strong></span>
+          <span>${escapeHtml(copy.effort)}: <strong>${escapeHtml(item.effort)}</strong></span>
         </footer>
-      </article>`,
-    )
+      </article>`;
+    })
     .join('');
 
   const ruleRows = rules
@@ -358,26 +958,32 @@ function generateHtmlReport(state) {
     new Set(securityControls.map((item) => item.category).filter(Boolean)),
   )
     .sort((a, b) => String(a).localeCompare(String(b)))
-    .map((category) => `<option value="${escapeHtml(category)}">${escapeHtml(category)}</option>`)
+    .map((category) => {
+      const translatedCategory = translateDynamicText(category, copy.code);
+      return `<option value="${escapeHtml(category)}">${escapeHtml(translatedCategory)}</option>`;
+    })
     .join('');
 
   const filteredSecurityRows = securityControls
     .slice(0, 200)
     .map((control) => {
+      const translatedTitle = translateDynamicText(control.title || '-', copy.code);
+      const translatedMessage = translateDynamicText(control.message || '-', copy.code);
+      const translatedRecommendation = translateDynamicText(control.recommendation || '-', copy.code);
       const status = String(control.status || 'unknown').toLowerCase();
       const mode = String(control.mode || 'unknown').toLowerCase();
       const severity = String(control.severity || 'low').toLowerCase();
       const category = String(control.category || 'general').toLowerCase();
-      const search = `${control.title || ''} ${control.message || ''} ${control.recommendation || ''} ${control.id || ''}`.toLowerCase();
+      const search = `${translatedTitle} ${translatedMessage} ${translatedRecommendation} ${control.id || ''}`.toLowerCase();
       return `
       <tr data-status="${escapeHtml(status)}" data-mode="${escapeHtml(mode)}" data-severity="${escapeHtml(severity)}" data-category="${escapeHtml(category)}" data-search="${escapeHtml(search)}">
         <td><span class="${controlStatusClass(control.status)}">${escapeHtml(control.status)}</span></td>
         <td>${escapeHtml(control.mode)}</td>
         <td>${escapeHtml(control.severity)}</td>
-        <td>${escapeHtml(control.category)}</td>
-        <td>${escapeHtml(control.title)}</td>
-        <td>${escapeHtml(control.message || '-')}</td>
-        <td>${escapeHtml(control.recommendation || '-')}</td>
+        <td>${escapeHtml(translateDynamicText(control.category, copy.code))}</td>
+        <td>${escapeHtml(translatedTitle)}</td>
+        <td>${escapeHtml(translatedMessage)}</td>
+        <td>${escapeHtml(translatedRecommendation)}</td>
       </tr>`;
     })
     .join('');
@@ -385,25 +991,38 @@ function generateHtmlReport(state) {
   const filteredViolationRows = violations
     .slice(0, 200)
     .map((item) => {
+      const translatedType = translateDynamicText(item.type, copy.code);
+      const translatedMessage = translateDynamicText(item.message, copy.code);
+      const translatedSuggestion = translateDynamicText(item.suggestion || '-', copy.code);
       const severity = String(item.severity || 'low').toLowerCase();
-      const search = `${item.type || ''} ${item.file || ''} ${item.message || ''} ${item.suggestion || ''}`.toLowerCase();
+      const search = `${translatedType || ''} ${item.file || ''} ${translatedMessage || ''} ${translatedSuggestion || ''}`.toLowerCase();
       return `
       <tr data-severity="${escapeHtml(severity)}" data-search="${escapeHtml(search)}">
         <td><span class="${severityBadge(item.severity)}">${escapeHtml(item.severity)}</span></td>
-        <td>${escapeHtml(item.type)}</td>
+        <td>${escapeHtml(translatedType)}</td>
         <td><code>${escapeHtml(item.file)}:${Number(item.line || 1)}</code></td>
-        <td>${escapeHtml(item.message)}</td>
-        <td>${escapeHtml(item.suggestion || '-')}</td>
+        <td>${escapeHtml(translatedMessage)}</td>
+        <td>${escapeHtml(translatedSuggestion)}</td>
       </tr>`;
     })
     .join('');
 
+  const languageSelectOptions = [
+    { code: 'en-US', label: copy.languageEn },
+    { code: 'pt-BR', label: copy.languagePt },
+  ]
+    .map((item) => {
+      const selected = item.code === copy.code ? ' selected' : '';
+      return `<option value="${escapeHtml(item.code)}"${selected}>${escapeHtml(item.label)}</option>`;
+    })
+    .join('');
+
   return `<!doctype html>
-<html lang="pt-BR">
+<html lang="${escapeHtml(copy.code)}">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>ACE Report</title>
+  <title>${escapeHtml(copy.reportTitle)}</title>
   <style>
     :root {
       --bg: #080d1b;
@@ -499,6 +1118,52 @@ function generateHtmlReport(state) {
       letter-spacing: .01em;
     }
 
+    .lang-switch {
+      margin-left: auto;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      border: 1px solid rgba(255,255,255,.24);
+      border-radius: 999px;
+      padding: 6px 10px;
+      background: rgba(255,255,255,.12);
+      backdrop-filter: blur(8px);
+      font-size: .82rem;
+      font-weight: 700;
+      letter-spacing: .01em;
+    }
+
+    .lang-switch span {
+      color: rgba(255,255,255,.92);
+      white-space: nowrap;
+    }
+
+    .lang-switch select {
+      appearance: none;
+      border: 1px solid rgba(255,255,255,.32);
+      background: rgba(12, 22, 49, .65);
+      color: #fff;
+      border-radius: 999px;
+      padding: 5px 28px 5px 10px;
+      font: inherit;
+      cursor: pointer;
+      background-image:
+        linear-gradient(45deg, transparent 50%, rgba(255,255,255,.9) 50%),
+        linear-gradient(135deg, rgba(255,255,255,.9) 50%, transparent 50%);
+      background-position:
+        calc(100% - 16px) calc(50% - 2px),
+        calc(100% - 11px) calc(50% - 2px);
+      background-size: 5px 5px, 5px 5px;
+      background-repeat: no-repeat;
+      min-width: 152px;
+    }
+
+    .lang-switch select:focus {
+      outline: none;
+      box-shadow: 0 0 0 3px rgba(255,255,255,.22);
+      border-color: rgba(255,255,255,.5);
+    }
+
     .panel {
       background: linear-gradient(180deg, rgba(15, 24, 45, .92), rgba(12, 20, 38, .88));
       border: 1px solid rgba(39, 56, 94, .95);
@@ -526,10 +1191,12 @@ function generateHtmlReport(state) {
 
     .score-grid-primary {
       grid-template-columns: repeat(12, minmax(0, 1fr));
+      grid-auto-flow: row dense;
     }
 
     .score-grid-secondary {
-      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      grid-template-columns: repeat(12, minmax(0, 1fr));
+      grid-auto-flow: row dense;
     }
 
     .score-grid-primary .kpi-card {
@@ -540,6 +1207,17 @@ function generateHtmlReport(state) {
     .score-grid-primary .kpi-card.scope-card {
       grid-column: span 4;
     }
+
+    .score-grid-secondary .kpi-card {
+      grid-column: span 2;
+      min-width: 0;
+    }
+
+    .score-grid-secondary .kpi-card.kpi-col-12 { grid-column: span 12; }
+    .score-grid-secondary .kpi-card.kpi-col-6 { grid-column: span 6; }
+    .score-grid-secondary .kpi-card.kpi-col-4 { grid-column: span 4; }
+    .score-grid-secondary .kpi-card.kpi-col-3 { grid-column: span 3; }
+    .score-grid-secondary .kpi-card.kpi-col-2 { grid-column: span 2; }
 
     .kpi-card {
       background: linear-gradient(145deg, #162441, #111b32);
@@ -969,7 +1647,11 @@ function generateHtmlReport(state) {
       }
 
       .score-grid-secondary {
-        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        grid-template-columns: repeat(8, minmax(0, 1fr));
+      }
+
+      .score-grid-secondary .kpi-card {
+        grid-column: span 2;
       }
     }
 
@@ -979,7 +1661,11 @@ function generateHtmlReport(state) {
       }
 
       .score-grid-secondary {
-        grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+        grid-template-columns: repeat(6, minmax(0, 1fr));
+      }
+
+      .score-grid-secondary .kpi-card {
+        grid-column: span 2;
       }
     }
 
@@ -1008,7 +1694,8 @@ function generateHtmlReport(state) {
       }
 
       .score-grid-primary .kpi-card,
-      .score-grid-primary .kpi-card.scope-card {
+      .score-grid-primary .kpi-card.scope-card,
+      .score-grid-secondary .kpi-card {
         grid-column: span 1;
       }
 
@@ -1028,7 +1715,8 @@ function generateHtmlReport(state) {
       }
 
       .score-grid-primary .kpi-card,
-      .score-grid-primary .kpi-card.scope-card {
+      .score-grid-primary .kpi-card.scope-card,
+      .score-grid-secondary .kpi-card {
         grid-column: span 1;
       }
     }
@@ -1037,167 +1725,161 @@ function generateHtmlReport(state) {
 <body>
   <main class="wrapper">
     <section class="hero">
-      <h1>ACE · Architectural Coverage Engine</h1>
+      <h1>${escapeHtml(copy.heroTitle)}</h1>
       <div class="meta">
-        <span class="tag">Atualizado: ${escapeHtml(state.updatedAt || '-')}</span>
-        <span class="tag">Pattern: ${escapeHtml(state.model?.dominantPattern || 'unknown')}</span>
-        <span class="tag">Security: ${formatPercent(security.score || 0)}</span>
-        <span class="tag">Violations: ${violations.length}</span>
-        <span class="tag">Sugestões: ${suggestions.length}</span>
-        <span class="tag">Decisões: ${decisions.length}</span>
+        <span class="tag">${escapeHtml(copy.updatedLabel)}: ${escapeHtml(state.updatedAt || '-')}</span>
+        <span class="tag">${escapeHtml(copy.patternLabel)}: ${escapeHtml(state.model?.dominantPattern || 'unknown')}</span>
+        <span class="tag">${escapeHtml(copy.securityLabel)}: ${formatPercent(security.score || 0)}</span>
+        <span class="tag">${escapeHtml(copy.violationsLabel)}: ${violations.length}</span>
+        <span class="tag">${escapeHtml(copy.suggestionsLabel)}: ${suggestions.length}</span>
+        <span class="tag">${escapeHtml(copy.decisionsLabel)}: ${decisions.length}</span>
+        <label class="lang-switch">
+          <span>${escapeHtml(copy.languageLabel)}</span>
+          <select id="ace-lang-select" aria-label="${escapeHtml(copy.languageLabel)}">
+            ${languageSelectOptions}
+          </select>
+        </label>
       </div>
     </section>
 
     <section class="panel">
-      <h2 class="panel-title">Core Scorecards</h2>
+      <h2 class="panel-title">${escapeHtml(copy.coreScorecards)}</h2>
       <section class="score-grid score-grid-primary">
         <article class="kpi-card">
-          <h3>AchCoverage</h3>
+          <h3>${escapeHtml(copy.achCoverage)}</h3>
           <p class="metric">${formatPercent(coverage.overall)}</p>
         </article>
         <article class="kpi-card">
-          <h3>Tendência</h3>
+          <h3>${escapeHtml(copy.trend)}</h3>
           <p class="metric ${trend > 0 ? 'delta-positive' : trend < 0 ? 'delta-negative' : 'delta-neutral'}">${trendText}</p>
         </article>
         <article class="kpi-card">
-          <h3>Confiança</h3>
+          <h3>${escapeHtml(copy.confidence)}</h3>
           <p class="metric">${formatPercent(coverage.confidence)}</p>
         </article>
         <article class="kpi-card">
-          <h3>Security Score</h3>
+          <h3>${escapeHtml(copy.securityScore)}</h3>
           <p class="metric">${formatPercent(security.score || 0)}</p>
         </article>
         <article class="kpi-card">
-          <h3>Security Fails</h3>
+          <h3>${escapeHtml(copy.securityFails)}</h3>
           <p class="metric">${Number(securityTotals.fail || 0)}</p>
         </article>
         <article class="kpi-card scope-card">
-          <h3>Escopo</h3>
+          <h3>${escapeHtml(copy.scope)}</h3>
           <p class="metric">${Number(coverage.scannedFiles || 0)}/${Number(coverage.totalPhpFiles || 0)}</p>
         </article>
         <article class="kpi-card">
-          <h3>Layering</h3>
+          <h3>${escapeHtml(copy.layering)}</h3>
           <p class="metric">${formatPercent(dimensions.layering)}</p>
         </article>
         <article class="kpi-card">
-          <h3>Validation</h3>
+          <h3>${escapeHtml(copy.validation)}</h3>
           <p class="metric">${formatPercent(dimensions.validation)}</p>
         </article>
         <article class="kpi-card">
-          <h3>Testability</h3>
+          <h3>${escapeHtml(copy.testability)}</h3>
           <p class="metric">${formatPercent(dimensions.testability)}</p>
         </article>
         <article class="kpi-card">
-          <h3>Consistency</h3>
+          <h3>${escapeHtml(copy.consistency)}</h3>
           <p class="metric">${formatPercent(dimensions.consistency)}</p>
+        </article>
+        <article class="kpi-card">
+          <h3>${escapeHtml(copy.authorization)}</h3>
+          <p class="metric">${formatPercent(dimensions.authorization)}</p>
         </article>
       </section>
       <section class="score-grid score-grid-secondary overview-gap">
-        <article class="kpi-card">
-          <h3>Security Automated</h3>
-          <p class="metric">${formatPercent(securityModeSummary.automated?.score || 0)}</p>
-        </article>
-        <article class="kpi-card">
-          <h3>Security Semi</h3>
-          <p class="metric">${formatPercent(securityModeSummary.semi?.score || 0)}</p>
-        </article>
-        <article class="kpi-card">
-          <h3>Security Manual</h3>
-          <p class="metric">${formatPercent(securityModeSummary.manual?.score || 0)}</p>
-        </article>
-        <article class="kpi-card">
-          <h3>Security Status</h3>
-          <p class="metric">${Number(securityTotals.pass || 0)}/${Number(securityTotals.total || 0)}</p>
-        </article>
-        ${filamentSecurityCards}
+        ${secondaryCardMarkup}
       </section>
     </section>
 
     <section class="panel">
-      <h2 class="panel-title">Trend & Diff</h2>
+      <h2 class="panel-title">${escapeHtml(copy.trendDiff)}</h2>
       <div class="mini-grid">
         <article class="mini-panel">
-          <h3 class="mini-title">AchCoverage vs Security (histórico)</h3>
+          <h3 class="mini-title">${escapeHtml(copy.trendHistoryTitle)}</h3>
           ${trendSvg}
         </article>
         <article class="mini-panel">
-          <h3 class="mini-title">Último ciclo</h3>
-          <div class="kpi-line"><span>Novas inconsistências</span><strong>${Number(state.lastScan?.newViolations || 0)}</strong></div>
-          <div class="kpi-line"><span>Resolvidas</span><strong>${Number(state.lastScan?.resolvedViolations || 0)}</strong></div>
-          <div class="kpi-line"><span>Waived</span><strong>${waivedViolations.length}</strong></div>
-          <div class="kpi-line"><span>Cache hits</span><strong>${Number(state.lastScan?.cacheHits || 0)}</strong></div>
-          <div class="kpi-line"><span>Reanalisados</span><strong>${Number(state.lastScan?.analyzedFiles || 0)}</strong></div>
-          <div class="kpi-line"><span>Ignorados por config</span><strong>${Number(state.lastScan?.ignoredFiles || 0)}</strong></div>
+          <h3 class="mini-title">${escapeHtml(copy.lastCycle)}</h3>
+          <div class="kpi-line"><span>${escapeHtml(copy.newInconsistencies)}</span><strong>${Number(state.lastScan?.newViolations || 0)}</strong></div>
+          <div class="kpi-line"><span>${escapeHtml(copy.resolvedItems)}</span><strong>${Number(state.lastScan?.resolvedViolations || 0)}</strong></div>
+          <div class="kpi-line"><span>${escapeHtml(copy.waivedItems)}</span><strong>${waivedViolations.length}</strong></div>
+          <div class="kpi-line"><span>${escapeHtml(copy.cacheHits)}</span><strong>${Number(state.lastScan?.cacheHits || 0)}</strong></div>
+          <div class="kpi-line"><span>${escapeHtml(copy.reanalyzedFiles)}</span><strong>${Number(state.lastScan?.analyzedFiles || 0)}</strong></div>
+          <div class="kpi-line"><span>${escapeHtml(copy.ignoredByConfig)}</span><strong>${Number(state.lastScan?.ignoredFiles || 0)}</strong></div>
         </article>
       </div>
     </section>
 
     <section class="panel">
-      <h2 class="panel-title">Domain Health Profile</h2>
+      <h2 class="panel-title">${escapeHtml(copy.domainHealthProfile)}</h2>
       <section class="health-grid">
         ${healthDomainCards}
       </section>
     </section>
 
     <section class="panel" id="security-panel">
-      <h2 class="panel-title">Security Baseline</h2>
+      <h2 class="panel-title">${escapeHtml(copy.securityBaseline)}</h2>
       ${securityControls.length === 0
-        ? '<p class="empty">Baseline de segurança ainda não avaliado. Execute um scan.</p>'
+        ? `<p class="empty">${escapeHtml(copy.securityBaselineEmpty)}</p>`
         : `<div class="filters" id="security-filters">
           <label class="filter-field">
-            <span>Status</span>
+            <span>${escapeHtml(copy.status)}</span>
             <select id="security-status">
-              <option value="">Todos</option>
-              <option value="fail">Fail</option>
-              <option value="warning">Warning</option>
-              <option value="unknown">Unknown</option>
-              <option value="pass">Pass</option>
+              <option value="">${escapeHtml(copy.allMasc)}</option>
+              <option value="fail">${escapeHtml(copy.fail)}</option>
+              <option value="warning">${escapeHtml(copy.warning)}</option>
+              <option value="unknown">${escapeHtml(copy.unknown)}</option>
+              <option value="pass">${escapeHtml(copy.pass)}</option>
             </select>
           </label>
           <label class="filter-field">
-            <span>Modo</span>
+            <span>${escapeHtml(copy.mode)}</span>
             <select id="security-mode">
-              <option value="">Todos</option>
-              <option value="automated">Automated</option>
-              <option value="semi">Semi</option>
-              <option value="manual">Manual</option>
+              <option value="">${escapeHtml(copy.allMasc)}</option>
+              <option value="automated">${escapeHtml(copy.automated)}</option>
+              <option value="semi">${escapeHtml(copy.semi)}</option>
+              <option value="manual">${escapeHtml(copy.manual)}</option>
             </select>
           </label>
           <label class="filter-field">
-            <span>Severidade</span>
+            <span>${escapeHtml(copy.severity)}</span>
             <select id="security-severity">
-              <option value="">Todas</option>
-              <option value="critical">Critical</option>
-              <option value="high">High</option>
-              <option value="medium">Medium</option>
-              <option value="low">Low</option>
+              <option value="">${escapeHtml(copy.allFem)}</option>
+              <option value="critical">${escapeHtml(copy.critical)}</option>
+              <option value="high">${escapeHtml(copy.high)}</option>
+              <option value="medium">${escapeHtml(copy.medium)}</option>
+              <option value="low">${escapeHtml(copy.low)}</option>
             </select>
           </label>
           <label class="filter-field">
-            <span>Categoria</span>
+            <span>${escapeHtml(copy.category)}</span>
             <select id="security-category">
-              <option value="">Todas</option>
+              <option value="">${escapeHtml(copy.allFem)}</option>
               ${securityCategoryOptions}
             </select>
           </label>
           <label class="filter-field">
-            <span>Buscar</span>
-            <input id="security-search" type="search" placeholder="controle, risco, recomendação..." />
+            <span>${escapeHtml(copy.search)}</span>
+            <input id="security-search" type="search" placeholder="${escapeHtml(copy.searchSecurityPlaceholder)}" />
           </label>
-          <button type="button" class="btn-clear" id="security-clear">Limpar filtros</button>
+          <button type="button" class="btn-clear" id="security-clear">${escapeHtml(copy.clearFilters)}</button>
           <span class="filter-counter" id="security-counter"></span>
         </div>
         <div class="table-wrap">
           <table>
             <thead>
               <tr>
-                <th>Status</th>
-                <th>Modo</th>
-                <th>Severidade</th>
-                <th>Categoria</th>
-                <th>Controle</th>
-                <th>Diagnóstico</th>
-                <th>Recomendação</th>
+                <th>${escapeHtml(copy.status)}</th>
+                <th>${escapeHtml(copy.mode)}</th>
+                <th>${escapeHtml(copy.severity)}</th>
+                <th>${escapeHtml(copy.category)}</th>
+                <th>${escapeHtml(copy.control)}</th>
+                <th>${escapeHtml(copy.diagnosis)}</th>
+                <th>${escapeHtml(copy.recommendation)}</th>
               </tr>
             </thead>
             <tbody id="security-table-body">${filteredSecurityRows}</tbody>
@@ -1206,35 +1888,35 @@ function generateHtmlReport(state) {
     </section>
 
     <section class="panel" id="violations-panel">
-      <h2 class="panel-title">Inconsistências Recentes</h2>
+      <h2 class="panel-title">${escapeHtml(copy.recentViolations)}</h2>
       ${violations.length === 0
-        ? '<p class="empty">Nenhuma inconsistência registrada no momento.</p>'
+        ? `<p class="empty">${escapeHtml(copy.recentViolationsEmpty)}</p>`
         : `<div class="filters filters-compact" id="violations-filters">
           <label class="filter-field">
-            <span>Severidade</span>
+            <span>${escapeHtml(copy.severity)}</span>
             <select id="violation-severity">
-              <option value="">Todas</option>
-              <option value="high">High</option>
-              <option value="medium">Medium</option>
-              <option value="low">Low</option>
+              <option value="">${escapeHtml(copy.allFem)}</option>
+              <option value="high">${escapeHtml(copy.high)}</option>
+              <option value="medium">${escapeHtml(copy.medium)}</option>
+              <option value="low">${escapeHtml(copy.low)}</option>
             </select>
           </label>
           <label class="filter-field">
-            <span>Buscar</span>
-            <input id="violation-search" type="search" placeholder="tipo, arquivo, mensagem..." />
+            <span>${escapeHtml(copy.search)}</span>
+            <input id="violation-search" type="search" placeholder="${escapeHtml(copy.searchViolationsPlaceholder)}" />
           </label>
-          <button type="button" class="btn-clear" id="violation-clear">Limpar filtros</button>
+          <button type="button" class="btn-clear" id="violation-clear">${escapeHtml(copy.clearFilters)}</button>
           <span class="filter-counter" id="violation-counter"></span>
         </div>
         <div class="table-wrap">
           <table>
             <thead>
               <tr>
-                <th>Severidade</th>
-                <th>Tipo</th>
-                <th>Arquivo</th>
-                <th>Mensagem</th>
-                <th>Sugestão</th>
+                <th>${escapeHtml(copy.severity)}</th>
+                <th>${escapeHtml(copy.type)}</th>
+                <th>${escapeHtml(copy.file)}</th>
+                <th>${escapeHtml(copy.message)}</th>
+                <th>${escapeHtml(copy.suggestion)}</th>
               </tr>
             </thead>
             <tbody id="violations-table-body">${filteredViolationRows}</tbody>
@@ -1243,18 +1925,18 @@ function generateHtmlReport(state) {
     </section>
 
     <section class="panel">
-      <h2 class="panel-title">Top Hotspots</h2>
+      <h2 class="panel-title">${escapeHtml(copy.topHotspots)}</h2>
       ${hotspots.length === 0
-        ? '<p class="empty">Sem hotspots no momento.</p>'
+        ? `<p class="empty">${escapeHtml(copy.topHotspotsEmpty)}</p>`
         : `<div class="table-wrap">
           <table>
             <thead>
               <tr>
-                <th>Arquivo</th>
-                <th>Total</th>
-                <th>High</th>
-                <th>Medium</th>
-                <th>Low</th>
+                <th>${escapeHtml(copy.file)}</th>
+                <th>${escapeHtml(copy.total)}</th>
+                <th>${escapeHtml(copy.high)}</th>
+                <th>${escapeHtml(copy.medium)}</th>
+                <th>${escapeHtml(copy.low)}</th>
               </tr>
             </thead>
             <tbody>${hotspotRows}</tbody>
@@ -1263,31 +1945,33 @@ function generateHtmlReport(state) {
     </section>
 
     <section class="panel">
-      <h2 class="panel-title">Waived Violations</h2>
+      <h2 class="panel-title">${escapeHtml(copy.waivedViolationsTitle)}</h2>
       ${waivedViolations.length === 0
-        ? '<p class="empty">Nenhuma inconsistência está em waiver ativo.</p>'
+        ? `<p class="empty">${escapeHtml(copy.waivedViolationsEmpty)}</p>`
         : `<div class="table-wrap">
           <table>
             <thead>
               <tr>
-                <th>Tipo</th>
-                <th>Arquivo</th>
-                <th>Mensagem</th>
-                <th>Waiver</th>
+                <th>${escapeHtml(copy.type)}</th>
+                <th>${escapeHtml(copy.file)}</th>
+                <th>${escapeHtml(copy.message)}</th>
+                <th>${escapeHtml(copy.waiver)}</th>
               </tr>
             </thead>
             <tbody>
               ${waivedViolations
                 .slice(0, 120)
-                .map(
-                  (item) => `
+                .map((item) => {
+                  const translatedType = translateDynamicText(item.type, copy.code);
+                  const translatedMessage = translateDynamicText(item.message || '-', copy.code);
+                  return `
                 <tr>
-                  <td>${escapeHtml(item.type)}</td>
+                  <td>${escapeHtml(translatedType)}</td>
                   <td><code>${escapeHtml(item.file)}:${Number(item.line || 1)}</code></td>
-                  <td>${escapeHtml(item.message || '-')}</td>
+                  <td>${escapeHtml(translatedMessage)}</td>
                   <td><code>${escapeHtml(item.waivedBy?.id || '-')}</code></td>
-                </tr>`,
-                )
+                </tr>`;
+                })
                 .join('')}
             </tbody>
           </table>
@@ -1295,19 +1979,19 @@ function generateHtmlReport(state) {
     </section>
 
     <section class="panel">
-      <h2 class="panel-title">Quick Wins (Impacto Alto + Esforço Baixo)</h2>
+      <h2 class="panel-title">${escapeHtml(copy.quickWinsTitle)}</h2>
       ${quickWins.length === 0
-        ? '<p class="empty">Sem quick wins disponíveis no momento.</p>'
+        ? `<p class="empty">${escapeHtml(copy.quickWinsEmpty)}</p>`
         : `<div class="table-wrap">
           <table>
             <thead>
               <tr>
-                <th>Rank</th>
-                <th>Ação</th>
-                <th>Categoria</th>
-                <th>Impacto</th>
-                <th>Esforço</th>
-                <th>Detalhe</th>
+                <th>${escapeHtml(copy.rank)}</th>
+                <th>${escapeHtml(copy.action)}</th>
+                <th>${escapeHtml(copy.category)}</th>
+                <th>${escapeHtml(copy.impact)}</th>
+                <th>${escapeHtml(copy.effort)}</th>
+                <th>${escapeHtml(copy.detail)}</th>
               </tr>
             </thead>
             <tbody>${quickWinRows}</tbody>
@@ -1316,26 +2000,26 @@ function generateHtmlReport(state) {
     </section>
 
     <section class="panel">
-      <h2 class="panel-title">Sugestões Proativas</h2>
+      <h2 class="panel-title">${escapeHtml(copy.proactiveSuggestions)}</h2>
       ${suggestions.length === 0
-        ? '<p class="empty">Sem sugestões proativas nesta execução.</p>'
+        ? `<p class="empty">${escapeHtml(copy.proactiveSuggestionsEmpty)}</p>`
         : `<div class="suggestions">${suggestionCards}</div>`}
     </section>
 
     <section class="panel">
-      <h2 class="panel-title">Padrões Inferidos e Esperados</h2>
+      <h2 class="panel-title">${escapeHtml(copy.inferredPatterns)}</h2>
       ${Object.keys(patterns).length === 0
-        ? '<p class="empty">Ainda sem padrões inferidos. Execute um scan com escopo relevante.</p>'
+        ? `<p class="empty">${escapeHtml(copy.inferredPatternsEmpty)}</p>`
         : `<div class="table-wrap">
           <table>
             <thead>
               <tr>
-                <th>Chave</th>
-                <th>Inferido</th>
-                <th>Esperado</th>
-                <th>Fonte</th>
-                <th>Confiança</th>
-                <th>Adoção</th>
+                <th>${escapeHtml(copy.key)}</th>
+                <th>${escapeHtml(copy.inferred)}</th>
+                <th>${escapeHtml(copy.expected)}</th>
+                <th>${escapeHtml(copy.source)}</th>
+                <th>${escapeHtml(copy.confidence)}</th>
+                <th>${escapeHtml(copy.adoption)}</th>
               </tr>
             </thead>
             <tbody>${patternRows}</tbody>
@@ -1344,17 +2028,17 @@ function generateHtmlReport(state) {
     </section>
 
     <section class="panel">
-      <h2 class="panel-title">Regras Ativas (Formalizadas)</h2>
+      <h2 class="panel-title">${escapeHtml(copy.activeRules)}</h2>
       ${rules.length === 0
-        ? '<p class="empty">Nenhuma regra formalizada. Use MCP `ace.formalize_rule` ou CLI `ace rule:add`.</p>'
+        ? `<p class="empty">${escapeHtml(copy.activeRulesEmpty)}</p>`
         : `<div class="table-wrap">
           <table>
             <thead>
               <tr>
-                <th>ID</th>
-                <th>Título</th>
-                <th>Fonte</th>
-                <th>Criada em</th>
+                <th>${escapeHtml(copy.id)}</th>
+                <th>${escapeHtml(copy.title)}</th>
+                <th>${escapeHtml(copy.source)}</th>
+                <th>${escapeHtml(copy.createdAt)}</th>
               </tr>
             </thead>
             <tbody>${ruleRows}</tbody>
@@ -1363,18 +2047,18 @@ function generateHtmlReport(state) {
     </section>
 
     <section class="panel">
-      <h2 class="panel-title">Decisões Arquiteturais Ativas</h2>
+      <h2 class="panel-title">${escapeHtml(copy.activeDecisions)}</h2>
       ${decisions.length === 0
-        ? '<p class="empty">Sem decisões ativas. Registre decisões com MCP `ace.record_arch_decision` ou CLI `ace decision:add`.</p>'
+        ? `<p class="empty">${escapeHtml(copy.activeDecisionsEmpty)}</p>`
         : `<div class="table-wrap">
           <table>
             <thead>
               <tr>
-                <th>ID</th>
-                <th>Chave</th>
-                <th>Preferência</th>
-                <th>Fonte</th>
-                <th>Criada em</th>
+                <th>${escapeHtml(copy.id)}</th>
+                <th>${escapeHtml(copy.key)}</th>
+                <th>${escapeHtml(copy.preference)}</th>
+                <th>${escapeHtml(copy.source)}</th>
+                <th>${escapeHtml(copy.createdAt)}</th>
               </tr>
             </thead>
             <tbody>${decisionRows}</tbody>
@@ -1384,6 +2068,10 @@ function generateHtmlReport(state) {
   </main>
   <script>
     (function () {
+      const langFiles = ${JSON.stringify(languageFiles)};
+      const currentLang = ${JSON.stringify(copy.code)};
+      const visibleLabel = ${JSON.stringify(copy.visibleSuffix)};
+
       function asLower(value) {
         return String(value || '').toLowerCase().trim();
       }
@@ -1420,7 +2108,7 @@ function generateHtmlReport(state) {
             if (ok) visible += 1;
           });
 
-          counterEl.textContent = visible + ' / ' + rows.length + ' visíveis';
+          counterEl.textContent = visible + ' / ' + rows.length + ' ' + visibleLabel;
         }
 
         [statusEl, modeEl, severityEl, categoryEl].forEach(function (el) {
@@ -1462,7 +2150,7 @@ function generateHtmlReport(state) {
             if (ok) visible += 1;
           });
 
-          counterEl.textContent = visible + ' / ' + rows.length + ' visíveis';
+          counterEl.textContent = visible + ' / ' + rows.length + ' ' + visibleLabel;
         }
 
         severityEl.addEventListener('change', render);
@@ -1476,20 +2164,69 @@ function generateHtmlReport(state) {
         render();
       }
 
+      function setupLanguageSelector() {
+        const selector = document.getElementById('ace-lang-select');
+        if (!selector) return;
+
+        selector.value = currentLang;
+        selector.addEventListener('change', function () {
+          const nextLang = this.value;
+          const nextFile = langFiles[nextLang];
+          if (!nextFile) return;
+
+          const target = new URL(nextFile, window.location.href);
+          window.location.href = target.toString();
+        });
+      }
+
       setupSecurityFilters();
       setupViolationFilters();
+      setupLanguageSelector();
     }());
   </script>
 </body>
 </html>`;
 }
 
-function writeReport(root, state) {
+function resolveReportLocale(root, options = {}) {
+  if (options.locale) {
+    return normalizeReportLocale(options.locale);
+  }
+
+  const config = loadAceConfig(root);
+  return normalizeReportLocale(config?.report?.language);
+}
+
+function writeReport(root, state, options = {}) {
   const outputPath = path.join(root, ACE_DIR, REPORT_FILE);
-  fs.writeFileSync(outputPath, `${generateHtmlReport(state)}\n`, 'utf8');
+  const locale = resolveReportLocale(root, options);
+  const languageFiles = REPORT_LANGUAGE_FILES;
+
+  Object.entries(languageFiles).forEach(([lang, filename]) => {
+    const localizedPath = path.join(root, ACE_DIR, filename);
+    fs.writeFileSync(
+      localizedPath,
+      `${generateHtmlReport(state, {
+        locale: lang,
+        languageFiles,
+      })}\n`,
+      'utf8',
+    );
+  });
+
+  fs.writeFileSync(
+    outputPath,
+    `${generateHtmlReport(state, {
+      locale,
+      languageFiles,
+    })}\n`,
+    'utf8',
+  );
   return outputPath;
 }
 
 module.exports = {
   writeReport,
+  generateHtmlReport,
+  normalizeReportLocale,
 };

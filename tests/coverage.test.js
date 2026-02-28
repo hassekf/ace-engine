@@ -86,8 +86,9 @@ test('computeCoverage returns deterministic dimensions and overall score', () =>
     validation: 67,
     testability: 89,
     consistency: 9,
+    authorization: 15,
   });
-  assert.equal(result.coverage.overall, 58);
+  assert.equal(result.coverage.overall, 53);
   assert.equal(result.coverage.confidence, 50);
   assert.equal(result.model.stats.violationCount, 2);
   assert.equal(result.model.dominantPattern, 'service-layer');

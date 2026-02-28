@@ -2,6 +2,7 @@ const ACE_DIR = '.ace';
 const STATE_FILE = 'ace.json';
 const RULES_FILE = 'rules.json';
 const DECISIONS_FILE = 'decisions.json';
+const OUTPUT_SCHEMA_VERSION = 1;
 const REPORT_FILE = 'report.html';
 const HISTORY_DIR = 'history';
 
@@ -26,6 +27,7 @@ module.exports = {
   STATE_FILE,
   RULES_FILE,
   DECISIONS_FILE,
+  OUTPUT_SCHEMA_VERSION,
   REPORT_FILE,
   HISTORY_DIR,
   DEFAULT_IGNORED_DIRS,

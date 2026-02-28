@@ -27,13 +27,15 @@ function defaultConfig() {
     },
     coverage: {
       weights: {
-        layering: 0.35,
-        validation: 0.2,
-        testability: 0.2,
-        consistency: 0.25,
+        layering: 0.3,
+        validation: 0.18,
+        testability: 0.18,
+        consistency: 0.19,
+        authorization: 0.15,
       },
     },
     report: {
+      language: 'en-US',
       tableRowLimit: 200,
       suggestionLimit: 40,
       hotspotLimit: 12,

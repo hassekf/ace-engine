@@ -45,6 +45,7 @@ function createInitialState(root) {
         validation: 0,
         testability: 0,
         consistency: 0,
+        authorization: 0,
       },
       scannedFiles: 0,
       totalPhpFiles: 0,

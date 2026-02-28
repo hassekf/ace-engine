@@ -164,6 +164,45 @@ function buildSuggestions({ metrics, coverage, model, violations, security = nul
     );
   }
 
+  if ((metrics.queueJobsMissingTries || 0) > 0 || (metrics.queueJobsMissingTimeout || 0) > 0) {
+    suggestions.push(
+      createSuggestion({
+        category: 'reliability',
+        title: 'Padronizar hygiene de fila em Jobs',
+        details:
+          `Jobs com lacunas de resiliência detectados (tries ausente: ${Number(metrics.queueJobsMissingTries || 0)}, timeout ausente: ${Number(metrics.queueJobsMissingTimeout || 0)}).`,
+        impact: 'high',
+        effort: 'low',
+      }),
+    );
+  }
+
+  if ((metrics.criticalQueueJobsWithoutUnique || 0) > 0) {
+    suggestions.push(
+      createSuggestion({
+        category: 'reliability',
+        title: 'Aplicar unicidade/idempotência em jobs críticos',
+        details:
+          'Foram detectados jobs com contexto financeiro/estado crítico sem sinal de unicidade. Isso eleva risco de execução duplicada.',
+        impact: 'high',
+        effort: 'medium',
+      }),
+    );
+  }
+
+  if ((metrics.middlewaresWithDirectModel || 0) > 0) {
+    suggestions.push(
+      createSuggestion({
+        category: 'architecture',
+        title: 'Remover acesso direto a Model em middleware',
+        details:
+          'Há middleware com consulta direta a Model, o que aumenta acoplamento e dificulta evolução do pipeline HTTP.',
+        impact: 'medium',
+        effort: 'medium',
+      }),
+    );
+  }
+
   if (metrics.requestAllCalls > 0) {
     suggestions.push(
       createSuggestion({

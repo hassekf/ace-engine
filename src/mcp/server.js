@@ -18,6 +18,7 @@ const {
 } = require('../pattern-registry');
 const { bootstrapLaravel } = require('../bootstrap');
 const { getComposerDependencyVersions, detectProjectModules, buildModuleScopeDraft } = require('../modules');
+const { OUTPUT_SCHEMA_VERSION } = require('../constants');
 
 function toToolResponse(data) {
   return {
@@ -97,6 +98,7 @@ function buildToolsManifest(profile = 'compact') {
         type: 'object',
         properties: {
           max_files: { type: 'number' },
+          files: { type: 'array', items: { type: 'string' } },
         },
       },
     },
@@ -498,6 +500,7 @@ function startMcpServer({ root, profile = null }) {
     if (name === 'ace.get_status') {
       const state = loadState(root);
       return {
+        schemaVersion: OUTPUT_SCHEMA_VERSION,
         coverage: state.coverage,
         model: state.model,
         lastScan: state.lastScan,
@@ -528,6 +531,7 @@ function startMcpServer({ root, profile = null }) {
     if (name === 'ace.get_project_model') {
       const state = loadState(root);
       return {
+        schemaVersion: OUTPUT_SCHEMA_VERSION,
         model: state.model,
         decisions: state.decisions || [],
         rules: state.rules,
@@ -618,6 +622,7 @@ function startMcpServer({ root, profile = null }) {
         state,
         registry: loadPatternRegistry(root),
         maxFiles: Number(args.max_files || 20),
+        scopeFiles: Array.isArray(args.files) ? args.files : [],
       });
     }
 

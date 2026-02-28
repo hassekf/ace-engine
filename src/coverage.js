@@ -15,6 +15,18 @@ function aggregateFromFileIndex(fileIndex) {
     largeControllerMethods: 0,
     services: 0,
     modelAllCallsInService: 0,
+    jobs: 0,
+    queueJobsMissingTries: 0,
+    queueJobsMissingTimeout: 0,
+    queueJobsWithoutFailedHandler: 0,
+    criticalQueueJobsWithoutUnique: 0,
+    listeners: 0,
+    listenerWithoutQueue: 0,
+    middlewares: 0,
+    fatMiddlewares: 0,
+    middlewaresWithDirectModel: 0,
+    enums: 0,
+    dtos: 0,
     commands: 0,
     modelAllCallsInCommand: 0,
     fatCommands: 0,
@@ -152,16 +164,60 @@ function computeValidationScore({ metrics, model }) {
   return clamp(Math.round(validationBalance * 100 - requestAllDensity * 25), 0, 100);
 }
 
+function computeAuthorizationScore({ metrics }) {
+  const authSurface =
+    Number(metrics.controllers || 0) +
+    Number(metrics.filamentPages || 0) +
+    Number(metrics.filamentWidgets || 0) +
+    Number(metrics.livewireComponents || 0) +
+    Number(metrics.routeFiles || 0);
+
+  if (!authSurface) {
+    return 100;
+  }
+
+  const authSignalRatio = Math.min(1, Number(metrics.authorizationChecks || 0) / Math.max(1, authSurface));
+  const policySupport =
+    Number(metrics.models || 0) > 0 ? Math.min(1, Number(metrics.policies || 0) / Math.max(1, Number(metrics.models || 0))) : 1;
+  const routeAuthScore =
+    Number(metrics.routeFiles || 0) > 0
+      ? 1 -
+        Math.min(
+          1,
+          Number(metrics.stateChangingRouteFilesWithoutAuth || 0) / Math.max(1, Number(metrics.routeFiles || 0)),
+        )
+      : 1;
+
+  return clamp(
+    Math.round(authSignalRatio * 55 + policySupport * 30 + routeAuthScore * 15),
+    0,
+    100,
+  );
+}
+
 function normalizeWeights(incoming = {}) {
   const defaults = {
-    layering: 0.35,
-    validation: 0.2,
-    testability: 0.2,
-    consistency: 0.25,
+    layering: 0.3,
+    validation: 0.18,
+    testability: 0.18,
+    consistency: 0.19,
+    authorization: 0.15,
   };
 
+  const incomingKeys = Object.keys(incoming || {});
+  const hasCustomWeights = incomingKeys.length > 0;
+  const base = hasCustomWeights
+    ? {
+        layering: 0,
+        validation: 0,
+        testability: 0,
+        consistency: 0,
+        authorization: 0,
+      }
+    : defaults;
+
   const merged = {
-    ...defaults,
+    ...base,
     ...incoming,
   };
 
@@ -169,7 +225,8 @@ function normalizeWeights(incoming = {}) {
     Number(merged.layering || 0) +
     Number(merged.validation || 0) +
     Number(merged.testability || 0) +
-    Number(merged.consistency || 0);
+    Number(merged.consistency || 0) +
+    Number(merged.authorization || 0);
 
   if (!total || Number.isNaN(total)) {
     return defaults;
@@ -180,12 +237,14 @@ function normalizeWeights(incoming = {}) {
     validation: Number(merged.validation || 0) / total,
     testability: Number(merged.testability || 0) / total,
     consistency: Number(merged.consistency || 0) / total,
+    authorization: Number(merged.authorization || 0) / total,
   };
 }
 
 function computeCoverage({ metrics, violations, scannedFiles, totalPhpFiles, model = null, weights = null }) {
   const layering = computeLayeringScore({ metrics, model });
   const validation = computeValidationScore({ metrics, model });
+  const authorization = computeAuthorizationScore({ metrics });
 
   const testRelevantFiles = metrics.controllers + metrics.services + metrics.models;
   const testabilityBase =
@@ -204,7 +263,8 @@ function computeCoverage({ metrics, violations, scannedFiles, totalPhpFiles, mod
     layering * normalizedWeights.layering +
       validation * normalizedWeights.validation +
       testability * normalizedWeights.testability +
-      consistency * normalizedWeights.consistency,
+      consistency * normalizedWeights.consistency +
+      authorization * normalizedWeights.authorization,
   );
   const confidence = totalPhpFiles > 0 ? clamp(Math.round((scannedFiles / totalPhpFiles) * 100), 0, 100) : 0;
 
@@ -217,6 +277,7 @@ function computeCoverage({ metrics, violations, scannedFiles, totalPhpFiles, mod
         validation,
         testability,
         consistency,
+        authorization,
       },
       scannedFiles,
       totalPhpFiles,

@@ -2,7 +2,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { lineFromIndex, normalizePath, slugify } = require('./helpers');
 
-const ANALYZER_VERSION = 10;
+const ANALYZER_VERSION = 11;
 
 function createMetrics() {
   return {
@@ -18,6 +18,18 @@ function createMetrics() {
     largeControllerMethods: 0,
     services: 0,
     modelAllCallsInService: 0,
+    jobs: 0,
+    queueJobsMissingTries: 0,
+    queueJobsMissingTimeout: 0,
+    queueJobsWithoutFailedHandler: 0,
+    criticalQueueJobsWithoutUnique: 0,
+    listeners: 0,
+    listenerWithoutQueue: 0,
+    middlewares: 0,
+    fatMiddlewares: 0,
+    middlewaresWithDirectModel: 0,
+    enums: 0,
+    dtos: 0,
     commands: 0,
     modelAllCallsInCommand: 0,
     fatCommands: 0,
@@ -91,6 +103,11 @@ function createSignals() {
     loopRelationAccessCount: 0,
     hasDbTransaction: false,
     hasCriticalWrite: false,
+    isQueuedJob: false,
+    hasQueueTries: false,
+    hasQueueTimeout: false,
+    hasQueueUnique: false,
+    hasQueueFailedHandler: false,
     hasTest: false,
   };
 }
@@ -126,6 +143,18 @@ function detectKind(relativePath, content) {
     return 'command';
   }
 
+  if (normalized.includes('/Jobs/')) {
+    return 'job';
+  }
+
+  if (normalized.includes('/Listeners/')) {
+    return 'listener';
+  }
+
+  if (normalized.includes('/Http/Middleware/')) {
+    return 'middleware';
+  }
+
   if (normalized.includes('/Filament/') && normalized.includes('/Resources/')) {
     return 'filament-resource';
   }
@@ -154,6 +183,14 @@ function detectKind(relativePath, content) {
     return 'request';
   }
 
+  if (normalized.includes('/Enums/')) {
+    return 'enum';
+  }
+
+  if (normalized.includes('/DTOs/') || normalized.includes('/Dtos/') || normalized.includes('/Data/')) {
+    return 'dto';
+  }
+
   if (/extends\s+Controller\b/.test(content)) {
     return 'controller';
   }
@@ -170,6 +207,10 @@ function detectKind(relativePath, content) {
     return 'command';
   }
 
+  if (/implements\s+[^{\n]*ShouldQueue\b/.test(content) && /class\s+[A-Za-z0-9_]+(?:Job|Listener)\b/.test(content)) {
+    return /Listener\b/.test(content) ? 'listener' : 'job';
+  }
+
   if (/extends\s+Resource\b/.test(content)) {
     return 'filament-resource';
   }
@@ -180,6 +221,14 @@ function detectKind(relativePath, content) {
 
   if (/extends\s+FormRequest\b/.test(content)) {
     return 'request';
+  }
+
+  if (/enum\s+[A-Za-z0-9_]+\b/.test(content)) {
+    return 'enum';
+  }
+
+  if (/class\s+[A-Za-z0-9_]+(?:Dto|DTO|Data)\b/.test(content)) {
+    return 'dto';
   }
 
   return 'other';
@@ -830,6 +879,214 @@ function analyzeService({ relativePath, content, metrics, signals, violations, t
   analyzeCriticalWriteTransaction({ relativePath, content, metrics, signals, violations });
 }
 
+function hasQueueKeywordContext(relativePath, content) {
+  return /(payment|withdraw|withdrawal|wallet|transfer|balance|billing|refund|bonus|cashback)/i.test(
+    `${relativePath}\n${content}`,
+  );
+}
+
+function analyzeJob({ relativePath, content, metrics, signals, violations, testBasenames, thresholds }) {
+  metrics.jobs = 1;
+  signals.fileLineCount = content.split('\n').length;
+  signals.methodCount = extractFunctionBlocks(content).length;
+
+  const isQueuedJob = /implements\s+[^{\n]*ShouldQueue\b/.test(content) || /\buse\s+Queueable\b/.test(content);
+  const hasQueueTries = /\b(?:public|protected)\s+\$tries\s*=\s*\d+/i.test(content);
+  const hasQueueTimeout = /\b(?:public|protected)\s+\$timeout\s*=\s*\d+/i.test(content);
+  const hasQueueUnique = /implements\s+[^{\n]*ShouldBeUnique(?:UntilProcessing)?\b/.test(content);
+  const hasQueueFailedHandler = /\bfunction\s+failed\s*\(/.test(content);
+  const isCriticalQueueJob = hasQueueKeywordContext(relativePath, content);
+
+  signals.isQueuedJob = isQueuedJob;
+  signals.hasQueueTries = hasQueueTries;
+  signals.hasQueueTimeout = hasQueueTimeout;
+  signals.hasQueueUnique = hasQueueUnique;
+  signals.hasQueueFailedHandler = hasQueueFailedHandler;
+
+  if (isQueuedJob && !hasQueueTries) {
+    metrics.queueJobsMissingTries += 1;
+    violations.push(
+      createViolation({
+        type: 'job-missing-tries',
+        severity: isCriticalQueueJob ? 'medium' : 'low',
+        file: relativePath,
+        line: 1,
+        message: 'Job enfileirado sem `$tries` explícito',
+        rationale: 'Sem retries explícitos o comportamento de falha pode ficar inconsistente entre ambientes.',
+        suggestion: 'Defina `$tries` de forma explícita no Job.',
+      }),
+    );
+  }
+
+  if (isQueuedJob && !hasQueueTimeout) {
+    metrics.queueJobsMissingTimeout += 1;
+    violations.push(
+      createViolation({
+        type: 'job-missing-timeout',
+        severity: isCriticalQueueJob ? 'medium' : 'low',
+        file: relativePath,
+        line: 1,
+        message: 'Job enfileirado sem `$timeout` explícito',
+        rationale: 'Sem timeout claro, jobs presos podem degradar throughput da fila.',
+        suggestion: 'Defina `$timeout` coerente com o SLA da operação.',
+      }),
+    );
+  }
+
+  if (isQueuedJob && !hasQueueFailedHandler) {
+    metrics.queueJobsWithoutFailedHandler += 1;
+    violations.push(
+      createViolation({
+        type: 'job-missing-failed-handler',
+        severity: 'low',
+        file: relativePath,
+        line: 1,
+        message: 'Job sem handler `failed()` explícito',
+        rationale: 'Tratamento de falha explícito melhora observabilidade e compensações.',
+        suggestion: 'Considere implementar `failed(Throwable $e)` para fallback/alerta.',
+      }),
+    );
+  }
+
+  if (isQueuedJob && isCriticalQueueJob && !hasQueueUnique) {
+    metrics.criticalQueueJobsWithoutUnique += 1;
+    violations.push(
+      createViolation({
+        type: 'critical-job-without-unique',
+        severity: 'medium',
+        file: relativePath,
+        line: 1,
+        message: 'Job crítico sem `ShouldBeUnique` detectado',
+        rationale: 'Fluxos financeiros/estado crítico sem unicidade podem gerar corrida e duplicidade.',
+        suggestion: 'Avalie `ShouldBeUnique`/idempotência para evitar processamento duplicado.',
+      }),
+    );
+  }
+
+  if (signals.fileLineCount > threshold(thresholds, 'fatJobLines', 260)) {
+    violations.push(
+      createViolation({
+        type: 'fat-job',
+        severity: 'low',
+        file: relativePath,
+        line: 1,
+        message: `Job com ${signals.fileLineCount} linhas`,
+        rationale: 'Jobs extensos tendem a misturar orquestração com regra de domínio.',
+        suggestion: 'Extraia passos para Services/Actions reutilizáveis.',
+      }),
+    );
+  }
+
+  const fileBasename = path.basename(relativePath, '.php');
+  const hasMatchingTest = testBasenames.has(`${fileBasename}Test`) || testBasenames.has(fileBasename);
+  signals.hasTest = hasMatchingTest;
+  if (!hasMatchingTest) {
+    metrics.missingTests += 1;
+    violations.push(
+      createViolation({
+        type: 'missing-test',
+        severity: 'low',
+        file: relativePath,
+        line: 1,
+        message: `Job ${fileBasename} sem teste dedicado`,
+        rationale: 'Jobs concentram fluxos assíncronos com alta chance de regressão.',
+        suggestion: `Adicionar teste para ${fileBasename}.`,
+      }),
+    );
+  }
+
+  analyzeDynamicRawSql({ relativePath, content, metrics, signals, violations });
+  analyzeQueryDiscipline({
+    relativePath,
+    content,
+    metrics,
+    signals,
+    violations,
+    sourceKind: 'service',
+  });
+}
+
+function analyzeListener({ relativePath, content, metrics, signals, violations, testBasenames }) {
+  metrics.listeners = 1;
+  signals.fileLineCount = content.split('\n').length;
+  signals.methodCount = extractFunctionBlocks(content).length;
+
+  const isQueuedListener = /implements\s+[^{\n]*ShouldQueue\b/.test(content);
+  const hasQueueTrait = /\buse\s+InteractsWithQueue\b/.test(content);
+  const hasQueueSignal = isQueuedListener || hasQueueTrait;
+
+  if (!hasQueueSignal && signals.fileLineCount > 140) {
+    metrics.listenerWithoutQueue += 1;
+    violations.push(
+      createViolation({
+        type: 'listener-heavy-without-queue',
+        severity: 'medium',
+        file: relativePath,
+        line: 1,
+        message: 'Listener pesado sem fila detectado',
+        rationale: 'Listeners longos síncronos podem adicionar latência no fluxo principal.',
+        suggestion: 'Avalie ShouldQueue para processamento assíncrono.',
+      }),
+    );
+  }
+
+  const fileBasename = path.basename(relativePath, '.php');
+  const hasMatchingTest = testBasenames.has(`${fileBasename}Test`) || testBasenames.has(fileBasename);
+  signals.hasTest = hasMatchingTest;
+  if (!hasMatchingTest) {
+    metrics.missingTests += 1;
+  }
+
+  analyzeDynamicRawSql({ relativePath, content, metrics, signals, violations });
+}
+
+function analyzeMiddleware({ relativePath, content, metrics, signals, violations, testBasenames, thresholds }) {
+  metrics.middlewares = 1;
+  signals.fileLineCount = content.split('\n').length;
+  signals.methodCount = extractFunctionBlocks(content).length;
+
+  if (signals.fileLineCount > threshold(thresholds, 'fatMiddlewareLines', 180)) {
+    metrics.fatMiddlewares = 1;
+    violations.push(
+      createViolation({
+        type: 'fat-middleware',
+        severity: 'low',
+        file: relativePath,
+        line: 1,
+        message: `Middleware com ${signals.fileLineCount} linhas`,
+        rationale: 'Middleware extenso tende a concentrar regra de negócio fora da camada esperada.',
+        suggestion: 'Mover regra de domínio para services/policies dedicadas.',
+      }),
+    );
+  }
+
+  const modelAliases = collectImportedModelAliases(content);
+  const modelCalls = collectModelStaticCalls(content, modelAliases);
+  if (modelCalls.length > 0) {
+    metrics.middlewaresWithDirectModel = 1;
+    violations.push(
+      createViolation({
+        type: 'middleware-direct-model',
+        severity: 'medium',
+        file: relativePath,
+        line: modelCalls[0].line,
+        message: 'Middleware com acesso direto a Model detectado',
+        rationale: 'Acesso direto a Model no middleware aumenta acoplamento e reduz previsibilidade do pipeline HTTP.',
+        suggestion: 'Delegue a consulta/decisão para service/policy específica.',
+      }),
+    );
+  }
+
+  const fileBasename = path.basename(relativePath, '.php');
+  const hasMatchingTest = testBasenames.has(`${fileBasename}Test`) || testBasenames.has(fileBasename);
+  signals.hasTest = hasMatchingTest;
+  if (!hasMatchingTest) {
+    metrics.missingTests += 1;
+  }
+
+  analyzeDynamicRawSql({ relativePath, content, metrics, signals, violations });
+}
+
 function analyzeModel({ relativePath, content, metrics, signals, violations, testBasenames, thresholds }) {
   metrics.models = 1;
   signals.fileLineCount = content.split('\n').length;
@@ -876,6 +1133,17 @@ function analyzeModel({ relativePath, content, metrics, signals, violations, tes
 
 function analyzePolicy({ content, metrics, signals }) {
   metrics.policies = 1;
+  signals.fileLineCount = content.split('\n').length;
+  signals.methodCount = extractFunctionBlocks(content).length;
+}
+
+function analyzeEnum({ content, metrics, signals }) {
+  metrics.enums = 1;
+  signals.fileLineCount = content.split('\n').length;
+}
+
+function analyzeDto({ content, metrics, signals }) {
+  metrics.dtos = 1;
   signals.fileLineCount = content.split('\n').length;
   signals.methodCount = extractFunctionBlocks(content).length;
 }
@@ -1135,6 +1403,12 @@ function analyzePhpFile({ relativePath, absolutePath, content, testBasenames, th
     analyzeController({ relativePath, content, metrics, signals, violations, testBasenames, thresholds });
   } else if (kind === 'service') {
     analyzeService({ relativePath, content, metrics, signals, violations, testBasenames, thresholds });
+  } else if (kind === 'job') {
+    analyzeJob({ relativePath, content, metrics, signals, violations, testBasenames, thresholds });
+  } else if (kind === 'listener') {
+    analyzeListener({ relativePath, content, metrics, signals, violations, testBasenames });
+  } else if (kind === 'middleware') {
+    analyzeMiddleware({ relativePath, content, metrics, signals, violations, testBasenames, thresholds });
   } else if (kind === 'command') {
     analyzeCommand({ relativePath, content, metrics, signals, violations, thresholds });
   } else if (kind === 'filament-resource') {
@@ -1151,6 +1425,10 @@ function analyzePhpFile({ relativePath, absolutePath, content, testBasenames, th
     analyzeModel({ relativePath, content, metrics, signals, violations, testBasenames, thresholds });
   } else if (kind === 'policy') {
     analyzePolicy({ content, metrics, signals });
+  } else if (kind === 'enum') {
+    analyzeEnum({ content, metrics, signals });
+  } else if (kind === 'dto') {
+    analyzeDto({ content, metrics, signals });
   }
 
   analyzeCommonSecuritySignals({

@@ -12,6 +12,7 @@ const { loadAceConfig, isIgnoredPath, applyWaivers, updateWaiver } = require('./
 const { loadState, saveState, appendHistorySnapshot } = require('./state');
 const { writeReport } = require('./report');
 const { nowIso, toRelative } = require('./helpers');
+const { OUTPUT_SCHEMA_VERSION } = require('./constants');
 
 function dedupeViolations(violations) {
   const map = new Map();
@@ -51,6 +52,7 @@ function updateFileIndex({ state, scannedFiles, analyzedEntries, root }) {
 function createSummary({ state, newViolations, resolvedViolations, reportPath }) {
   const securityFails = Number(state.security?.totals?.fail || 0);
   return {
+    schemaVersion: OUTPUT_SCHEMA_VERSION,
     achCoverage: state.coverage.overall,
     delta: state.coverage.delta,
     confidence: state.coverage.confidence,
@@ -131,7 +133,7 @@ function annotateAnalyzedEntries({ analyzedEntries, hashMap }) {
   return next;
 }
 
-function runScan({ root, scope = 'changed', explicitFiles = [], writeHtml = true }) {
+function runScan({ root, scope = 'changed', explicitFiles = [], writeHtml = true, reportLanguage = null }) {
   const startedAtMs = Date.now();
   const previousState = loadState(root);
   const config = loadAceConfig(root);
@@ -293,7 +295,9 @@ function runScan({ root, scope = 'changed', explicitFiles = [], writeHtml = true
   };
   appendHistorySnapshot(root, snapshot);
 
-  const reportPath = writeHtml ? writeReport(root, nextState) : path.join(root, '.ace', 'report.html');
+  const reportPath = writeHtml
+    ? writeReport(root, nextState, { locale: reportLanguage })
+    : path.join(root, '.ace', 'report.html');
 
   return createSummary({
     state: nextState,

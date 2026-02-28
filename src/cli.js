@@ -31,6 +31,7 @@ const {
 } = require('./pattern-registry');
 const { parseList } = require('./helpers');
 const { getComposerDependencyVersions, detectProjectModules, buildModuleScopeDraft } = require('./modules');
+const { OUTPUT_SCHEMA_VERSION } = require('./constants');
 
 const SUPPORTED_INIT_LLMS = ['claude', 'cursor', 'copilot', 'codex'];
 
@@ -62,10 +63,10 @@ ACE · Architectural Coverage Engine
 
 Uso:
   ace <comando> [--root=/abs/ou/rel/path]
-  ace scan [--scope=changed|all|path1,path2] [--files=a.php,b.php] [--json] [--root=...]
+  ace scan [--scope=changed|all|path1,path2] [--files=a.php,b.php] [--lang=pt-BR|en-US] [--json] [--root=...]
   ace watch [--interval=2200] [--root=...]
   ace status [--json] [--root=...]
-  ace report [--root=...]
+  ace report [--lang=pt-BR|en-US] [--root=...]
   ace mcp [--profile=compact|full] [--root=...]
   ace init [--force] [--json] [--llms=all|codex,claude,cursor,copilot] [--select-llms] [--root=...]
   ace config:init [--force] [--json] [--root=...]
@@ -78,7 +79,7 @@ Uso:
   ace waiver:add [--type=pattern-drift:*] [--file=app/Http/Controllers/*] [--severity=low] [--contains="texto"] --reason="..." [--until=2026-12-31]
   ace waiver:update --id="waiver_id" --status=active|inactive|expired [--reason="..."] [--until=2026-12-31]
   ace waiver:list [--status=active|inactive|expired] [--json]
-  ace learning:bundle [--json]
+  ace learning:bundle [--files=a.php,b.php] [--max_files=20] [--json]
   ace pattern:list [--json]
   ace pattern:upsert --json='{"key":"...","detector":{...}}'
   ace pattern:disable --key="controller.validation"
@@ -89,6 +90,7 @@ Uso:
 
 Exemplos:
   ace scan --scope=all
+  ace scan --scope=all --lang=en-US
   ace watch --interval=3000
   ace rule:add --title="Controller via Service" --constraints="No direct model call,Use Service"
   ace decision:add --key="controller.validation" --preferred="form-request" --rationale="Padronizar entrada"
@@ -100,6 +102,7 @@ Exemplos:
   ace init --llms=codex,claude
   ace init --select-llms
   ace init --root=/Users/voce/www/meu-projeto
+  ace report --lang=en-US
   ace status --root=/Users/voce/www/meu-projeto
 `.trim();
 
@@ -220,6 +223,7 @@ function statusPayload(root) {
   const modules = state.security?.metadata?.modules || [];
   const enabledModules = modules.filter((item) => item.enabled);
   return {
+    schemaVersion: OUTPUT_SCHEMA_VERSION,
     achCoverage: state.coverage.overall,
     delta: state.coverage.delta,
     confidence: state.coverage.confidence,
@@ -268,6 +272,7 @@ async function runCli(argv) {
       scope: args.scope || 'changed',
       explicitFiles: parseList(args.files),
       writeHtml: !args['no-report'],
+      reportLanguage: args.lang || null,
     });
 
     if (args.json) {
@@ -314,7 +319,9 @@ async function runCli(argv) {
 
   if (command === 'report') {
     const state = loadState(root);
-    const reportPath = writeReport(root, state);
+    const reportPath = writeReport(root, state, {
+      locale: args.lang || null,
+    });
     console.log(`Relatório gerado em: ${reportPath}`);
     return;
   }
@@ -456,6 +463,7 @@ async function runCli(argv) {
       state,
       registry: loadPatternRegistry(root),
       maxFiles: Number(args.max_files || 20),
+      scopeFiles: parseList(args.files),
     });
     console.log(JSON.stringify(payload, null, 2));
     return;

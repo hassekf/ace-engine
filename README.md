@@ -2,7 +2,7 @@
 
 **Incremental architectural analysis for Laravel projects. Zero dependencies.**
 
-ACE scans your Laravel codebase, measures architectural consistency across four dimensions, infers dominant patterns, evaluates a stack-aware security baseline, and exposes everything through a CLI and an MCP server for LLM integration.
+ACE scans your Laravel codebase, measures architectural consistency across five dimensions, infers dominant patterns, evaluates a stack-aware security baseline, and exposes everything through a CLI and an MCP server for LLM integration.
 
 ```
 AchCoverage: 74% (+3) | Security: 82% | Pattern: service-layer | Confidence: 100%
@@ -14,11 +14,11 @@ As Laravel projects grow, architectural decisions drift. Controllers that starte
 
 ACE makes this drift visible and measurable — without requiring any configuration, AST parsers, or external dependencies.
 
-- **Measures what matters**: layering, validation, testability, and consistency — weighted and composable
+- **Measures what matters**: layering, validation, testability, consistency, and authorization — weighted and composable
 - **Infers patterns**: detects your dominant patterns automatically instead of forcing conventions
 - **Tracks decisions**: formalize architectural decisions and rules that your team agreed on
 - **Stack-aware security**: evaluates Laravel, Filament, Livewire, Sanctum, Spatie Permission, and Horizon controls
-- **LLM-native**: MCP server lets Claude, Cursor, Copilot, or any MCP-compatible LLM query your architecture in real-time
+- **LLM-native**: MCP server lets Claude, Codex, Cursor, Copilot, or any MCP-compatible LLM query your architecture in real-time
 - **Incremental**: SHA1 cache means re-scans only analyze changed files
 - **Zero dependencies**: pure Node.js stdlib, runs everywhere Node 18+ runs
 
@@ -60,29 +60,36 @@ cd ace
 node ./bin/ace.js help
 ```
 
-## AchCoverage: The Four Dimensions
+## AchCoverage: The Five Dimensions
 
-ACE computes an **AchCoverage** score (0–100%) from four weighted dimensions:
+ACE computes an **AchCoverage** score (0–100%) from five weighted dimensions:
 
 | Dimension | Weight | What it measures |
 |---|---|---|
-| **Layering** | 35% | Are controllers delegating to services consistently? Or using direct model calls consistently? ACE adapts to _your_ chosen pattern. |
-| **Validation** | 20% | FormRequest adoption vs inline validation. Penalizes `$request->all()` usage. |
-| **Testability** | 20% | Ratio of controllers/services/models that have corresponding test files. |
-| **Consistency** | 25% | Violation density weighted by severity. Fewer violations = higher consistency. |
+| **Layering** | 30% | Are controllers delegating to services consistently? Or using direct model calls consistently? ACE adapts to _your_ chosen pattern. |
+| **Validation** | 18% | FormRequest adoption vs inline validation. Penalizes `$request->all()` usage. |
+| **Testability** | 18% | Ratio of controllers/services/models/jobs/middlewares with corresponding tests. |
+| **Consistency** | 19% | Violation density weighted by severity. Fewer violations = higher consistency. |
+| **Authorization** | 15% | Authorization signals, model↔policy presence, and auth hygiene in state-changing route surfaces. |
 
 Weights are configurable in `.ace/config.json`:
 
 ```json
 {
-  "coverageWeights": {
-    "layering": 0.35,
-    "validation": 0.20,
-    "testability": 0.20,
-    "consistency": 0.25
+  "coverage": {
+    "weights": {
+      "layering": 0.30,
+      "validation": 0.18,
+      "testability": 0.18,
+      "consistency": 0.19,
+      "authorization": 0.15
+    }
   }
 }
 ```
+
+`report.language` defines the default dashboard locale (`en-US` by default, optional `pt-BR`).  
+`--lang` on `ace scan`/`ace report` overrides it for that execution.
 
 ## Commands
 
@@ -92,11 +99,15 @@ Weights are configurable in `.ace/config.json`:
 ace scan --scope=all              # Full scan
 ace scan --scope=changed          # Incremental (only changed files)
 ace scan --files=app/Http/Controllers/UserController.php
+ace scan --scope=all --lang=en-US # Force report language for this scan
 ace status                        # Current state summary
 ace status --json                 # Machine-readable output
 ace report                        # Generate HTML dashboard
+ace report --lang=pt-BR           # Regenerate report in Portuguese (pt-BR)
 ace watch --interval=2200         # Watch for changes and re-scan
 ```
+
+The report includes an in-page language selector and pre-generates both localized files.
 
 ### Initialization & Config
 
@@ -217,13 +228,15 @@ Export a comprehensive context bundle for LLM consumption:
 
 ```bash
 ace learning:bundle --json
+ace learning:bundle --files=app/Http/Controllers/PaymentController.php --json
 ```
 
 Includes: coverage, security highlights, pattern registry, decisions, rules, hotspots, representative files, and guidance prompts.
+When `--files` is provided, ACE narrows the bundle to that scope plus directly related files.
 
 ## MCP Server
 
-ACE includes a stdio-based [MCP](https://modelcontextprotocol.io/) server compatible with Claude Code, Cursor, GitHub Copilot, and any MCP-compatible client.
+ACE includes a stdio-based [MCP](https://modelcontextprotocol.io/) server compatible with Claude Code, Codex, Cursor, GitHub Copilot, and any MCP-compatible client.
 
 ### Starting the server
 
@@ -423,8 +436,13 @@ ACE classifies PHP files into kinds for targeted analysis:
 |---|---|
 | `controller` | `app/Http/Controllers/` |
 | `service` | `app/Services/`, `app/Actions/`, `app/UseCases/` |
+| `job` | `app/Jobs/` |
+| `listener` | `app/Listeners/` |
+| `middleware` | `app/Http/Middleware/` |
 | `model` | `app/Models/` |
 | `policy` | `app/Policies/` |
+| `dto` | `app/DTOs/`, `app/Dtos/`, `app/Data/` |
+| `enum` | `app/Enums/` |
 | `command` | `app/Console/Commands/` |
 | `request` | `app/Http/Requests/` |
 | `filament-resource` | `app/Filament/*/Resources/` |
@@ -446,9 +464,12 @@ ACE uses heuristic-based analysis (regex + brace/parenthesis matching) to detect
 - `->get()` without constraints (unbounded queries)
 - N+1 query risks (lazy loading in loops)
 - Critical financial writes without `DB::transaction()`
+- Queue hygiene in jobs (`$tries`, `$timeout`, `failed()`, and uniqueness for critical jobs)
+- Heavy listeners without queue hints
+- Direct model access inside middleware
 - Authorization signals in Filament Pages/Widgets
 - Livewire locked properties
-- Test file existence per controller/service/model
+- Test file existence per controller/service/model/job/middleware
 
 ## Project Layout
 
@@ -463,6 +484,8 @@ ACE stores all artifacts in `.ace/`. Running `ace init` configures `.gitignore` 
 **Local/ephemeral** (auto-gitignored):
 - `.ace/ace.json` — live state (coverage, security, violations, file index)
 - `.ace/report.html` — HTML dashboard
+- `.ace/report.en-US.html` — English report (used by the in-report language selector)
+- `.ace/report.pt-BR.html` — Portuguese report (used by the in-report language selector)
 - `.ace/history/*.json` — per-scan snapshots
 - `.ace/integration/*` — MCP configuration snippets
 
@@ -476,22 +499,34 @@ ACE stores all artifacts in `.ace/`. Running `ace init` configures `.gitignore` 
 
 ```json
 {
-  "ignorePaths": ["app/Legacy", "app/Generated"],
-  "coverageWeights": {
-    "layering": 0.35,
-    "validation": 0.20,
-    "testability": 0.20,
-    "consistency": 0.25
+  "analysis": {
+    "ignorePaths": ["app/Legacy", "app/Generated"],
+    "thresholds": {
+      "fatControllerLines": 220,
+      "largeControllerMethodLines": 80,
+      "fatServiceLines": 260,
+      "fatModelLines": 320,
+      "fatModelMethods": 15,
+      "fatCommandLines": 260,
+      "fatFilamentResourceLines": 320,
+      "fatFilamentResourceMethods": 12
+    }
   },
-  "thresholds": {
-    "fatControllerLines": 250,
-    "largeMethodLines": 40,
-    "fatServiceLines": 300,
-    "fatModelLines": 400,
-    "fatCommandLines": 300,
-    "fatFilamentResourceLines": 400,
-    "fatFilamentPageLines": 300,
-    "fatFilamentWidgetLines": 250
+  "coverage": {
+    "weights": {
+      "layering": 0.30,
+      "validation": 0.18,
+      "testability": 0.18,
+      "consistency": 0.19,
+      "authorization": 0.15
+    }
+  },
+  "report": {
+    "language": "en-US",
+    "tableRowLimit": 200,
+    "suggestionLimit": 40,
+    "hotspotLimit": 12,
+    "historyLimit": 24
   },
   "waivers": []
 }
@@ -503,10 +538,10 @@ Every command accepts `--root=/path/to/project` to operate on a different direct
 
 ```
 ace help
-ace scan [--scope=changed|all|path1,path2] [--files=a.php,b.php] [--json]
+ace scan [--scope=changed|all|path1,path2] [--files=a.php,b.php] [--lang=pt-BR|en-US] [--json]
 ace watch [--interval=2200]
 ace status [--json]
-ace report
+ace report [--lang=pt-BR|en-US]
 ace mcp [--profile=compact|full]
 ace init [--force] [--json] [--llms=all|claude,cursor,copilot,codex] [--select-llms]
 ace config:init [--force] [--json]
@@ -514,12 +549,12 @@ ace config:show [--json]
 ace rule:add --title="..." [--description="..."] [--applies_to=a,b] [--constraints=x,y]
 ace rule:update --id="..." --status=active|deprecated|inactive|rejected [--note="..."]
 ace decision:add --key="..." --preferred="..." [--rationale="..."]
-ace decision:update --id="..." --status=active|approved|superseded|deprecated|rejected [--note="..."]
+ace decision:update --id="..." --status=active|approved|superseded|deprecated|rejected|expired|inactive [--note="..."]
 ace decision:list [--key=...] [--json]
 ace waiver:add [--type=...] [--file=...] [--severity=...] [--contains=...] --reason="..." [--until=YYYY-MM-DD]
 ace waiver:update --id="..." --status=active|inactive|expired [--reason="..."] [--until=YYYY-MM-DD]
 ace waiver:list [--status=active|inactive|expired] [--json]
-ace learning:bundle [--json]
+ace learning:bundle [--files=a.php,b.php] [--max_files=20] [--json]
 ace pattern:list [--json]
 ace pattern:upsert --json='...'
 ace pattern:disable --key="..."
@@ -529,14 +564,25 @@ ace modules:list [--enabled-only] [--json]
 ace bootstrap:laravel [--dry-run] [--scope=all|changed] [--min_confidence=55] [--min_adoption=55]
 ```
 
+## JSON Contract
+
+Machine-readable outputs include a `schemaVersion` field for forward compatibility:
+
+- `ace scan --json`
+- `ace status --json`
+- `ace learning:bundle --json`
+- MCP tools `ace.get_status` and `ace.get_project_model`
+
+If you integrate ACE with scripts/CI bots, validate `schemaVersion` before parsing.
+
 ## How it Works
 
 1. **Discovery** — finds all `.php` files, respecting ignore paths
 2. **Cache check** — compares SHA1 hash + analyzer version; unchanged files skip analysis
-3. **Analysis** — extracts ~60 metrics per file using heuristic-based PHP analysis
+3. **Analysis** — extracts a broad metric set per file using heuristic-based PHP analysis
 4. **Pattern inference** — detects dominant patterns using configurable detectors (`split_ratio`, `single_ratio`)
 5. **Waiver application** — matches and applies active waivers, auto-expires when due
-6. **Coverage** — computes 4 dimensions + weighted overall score
+6. **Coverage** — computes 5 dimensions + weighted overall score
 7. **Security** — evaluates stack-aware baseline controls
 8. **Suggestions** — generates actionable improvement suggestions
 9. **State persistence** — saves to `.ace/` with governance files as dedicated sidecars
@@ -552,10 +598,10 @@ ace bootstrap:laravel [--dry-run] [--scope=all|changed] [--min_confidence=55] [-
 ```bash
 git clone https://github.com/hassekf/ace-engine.git
 cd ace
-npm test   # 29 tests, ~50ms, no setup needed
+npm test   # 34+ tests, fast feedback, no setup needed
 ```
 
-Tests cover: analyzer heuristics, coverage computation, pattern inference, security baseline, state governance, scaffold initialization, module detection, MCP tool profiles, config management, decisions, and engine cache.
+Tests cover: analyzer heuristics, coverage computation, pattern inference, security baseline, state governance, scaffold initialization, module detection, MCP tool profiles, config management, decisions, learning bundles, and engine cache.
 
 ## License
 
