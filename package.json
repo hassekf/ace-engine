@@ -18,7 +18,7 @@
     "status": "node ./bin/ace.js status",
     "report": "node ./bin/ace.js report",
     "mcp": "node ./bin/ace.js mcp",
-    "test": "node --test tests/**/*.test.js"
+    "test": "node --test tests/*.test.js"
   },
   "keywords": [
     "laravel",
